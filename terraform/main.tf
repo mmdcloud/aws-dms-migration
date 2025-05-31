@@ -22,19 +22,19 @@ module "source_vpc" {
 module "source_vpc_public_subnets" {
   source                   = "./modules/gcp/network/subnet"
   name                     = "source-public-subnet"
-  subnets                  = var.public_subnets
+  subnets                  = var.source_public_subnets
   vpc_id                   = module.source_vpc.vpc_id
   private_ip_google_access = false
-  location                 = var.location
+  location                 = var.source_location
 }
 
 module "source_vpc_private_subnets" {
   source                   = "./modules/gcp/network/subnet"
   name                     = "source-private-subnet"
-  subnets                  = var.private_subnets
+  subnets                  = var.source_private_subnets
   vpc_id                   = module.source_vpc.vpc_id
   private_ip_google_access = true
-  location                 = var.location
+  location                 = var.source_location
 }
 
 # Secret Manager
@@ -51,7 +51,7 @@ module "source_db" {
   db_name                     = "source-db"
   db_user                     = "mohit"
   db_version                  = "MYSQL_8_0"
-  location                    = var.location
+  location                    = var.source_location
   tier                        = "db-f1-micro"
   ipv4_enabled                = false
   availability_type           = "ZONAL"
