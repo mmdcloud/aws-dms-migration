@@ -206,3 +206,58 @@ module "destination_db" {
   publicly_accessible    = false
   skip_final_snapshot    = true
 }
+
+# --------------------------- DMS Configuration ---------------------------
+
+# DMS Replication Instance
+module "dms_replication_instance" {
+  source                     = "./modules/aws/dms"
+  allocated_storage          = 20
+  apply_immediately          = false
+  replication_instance_class = "dms.t3.micro"
+  engine_version             = "3.4.7"
+  replication_instance_id    = "dms-instance"
+  vpc_security_group_ids     = [module.destination_rds_sg.id]
+
+  source_endpoint_id   = "cloudsql-source"
+  source_endpoint_type = "source"
+  source_engine_name   = "mysql"
+  source_username      = tostring(data.vault_generic_secret.cloudsql.data["username"])
+  source_password      = tostring(data.vault_generic_secret.cloudsql.data["password"])
+  source_server_name   = ""
+  source_port          = 3306
+  source_ssl_mode      = "none"
+
+  destination_endpoint_id   = "rds"
+  destination_endpoint_type = "target"
+  destination_engine_name   = "mysql"
+  destination_username      = tostring(data.vault_generic_secret.rds.data["username"])
+  destination_password      = tostring(data.vault_generic_secret.rds.data["password"])
+  destination_server_name   = ""
+  destination_port          = 3306
+  destination_ssl_mode      = "none"
+
+  tasks = [
+    {
+      migration_type      = "full-load"
+      replication_task_id = "cloudsql-to-rds-task"
+      table_mappings = jsonencode({
+        "rules" : [
+          {
+            "rule-type" : "selection",
+            "rule-id" : "1",
+            "rule-name" : "1",
+            "rule-action" : "include",
+            "filters" : [
+              {
+                "filter-type" : "source",
+                "table-name" : "%",
+                "schema-name" : "%"
+              }
+            ]
+          }
+        ]
+      })
+    }
+  ]
+}
