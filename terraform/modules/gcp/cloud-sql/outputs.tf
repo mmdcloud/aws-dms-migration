@@ -17,3 +17,8 @@ output "db_name" {
 output "db_connection_name" {
   value = google_sql_database_instance.db_instance.connection_name
 }
+
+output "public_ip_address" {
+  value = google_sql_database_instance.db_instance.public_ip_address
+  
+}

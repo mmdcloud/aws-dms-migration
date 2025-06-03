@@ -186,7 +186,7 @@ module "destination_db_credentials" {
 # RDS Instance
 module "destination_db" {
   source                  = "./modules/aws/rds"
-  db_name                 = "destination-db"
+  db_name                 = "destinationdb"
   allocated_storage       = 20
   engine                  = "mysql"
   engine_version          = "8.0"
@@ -209,22 +209,76 @@ module "destination_db" {
 
 # --------------------------- DMS Configuration ---------------------------
 
+# 1. Create DMS VPC Role
+resource "aws_iam_role" "dms_vpc_role" {
+  name               = "dms-vpc-role"
+  assume_role_policy = data.aws_iam_policy_document.dms_assume_role.json
+}
+
+data "aws_iam_policy_document" "dms_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      identifiers = ["dms.amazonaws.com"]
+      type        = "Service"
+    }
+  }
+}
+
+# 2. Attach the required AWS managed policy
+resource "aws_iam_role_policy_attachment" "dms_vpc_role_attachment" {
+  role       = aws_iam_role.dms_vpc_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSVPCManagementRole"
+}
+
+# 3. Create DMS CloudWatch Logs Role (if needed)
+resource "aws_iam_role" "dms_cloudwatch_logs_role" {
+  name               = "dms-cloudwatch-logs-role"
+  assume_role_policy = data.aws_iam_policy_document.dms_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "dms_cloudwatch_logs_role_attachment" {
+  role       = aws_iam_role.dms_cloudwatch_logs_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSCloudWatchLogsRole"
+}
+
+resource "aws_security_group" "dms_sg" {
+  name        = "dms-security-group"
+  description = "Allow DMS traffic"
+  vpc_id      = module.destination_vpc.vpc_id
+
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["10.0.0.0/16"] # Adjust to your VPC CIDR
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
 # DMS Replication Instance
 module "dms_replication_instance" {
   source                     = "./modules/aws/dms"
   allocated_storage          = 20
   apply_immediately          = false
   replication_instance_class = "dms.t3.micro"
-  engine_version             = "3.4.7"
+  engine_version             = "3.6.1"
   replication_instance_id    = "dms-instance"
-  vpc_security_group_ids     = [module.destination_rds_sg.id]
+  vpc_security_group_ids     = [aws_security_group.dms_sg.id]
 
   source_endpoint_id   = "cloudsql-source"
   source_endpoint_type = "source"
   source_engine_name   = "mysql"
   source_username      = tostring(data.vault_generic_secret.cloudsql.data["username"])
   source_password      = tostring(data.vault_generic_secret.cloudsql.data["password"])
-  source_server_name   = ""
+  source_server_name   = module.source_db.public_ip_address
   source_port          = 3306
   source_ssl_mode      = "none"
 
@@ -233,7 +287,7 @@ module "dms_replication_instance" {
   destination_engine_name   = "mysql"
   destination_username      = tostring(data.vault_generic_secret.rds.data["username"])
   destination_password      = tostring(data.vault_generic_secret.rds.data["password"])
-  destination_server_name   = ""
+  destination_server_name   = module.destination_db.endpoint
   destination_port          = 3306
   destination_ssl_mode      = "none"
 
@@ -259,5 +313,9 @@ module "dms_replication_instance" {
         ]
       })
     }
+  ]
+  depends_on = [
+    aws_iam_role_policy_attachment.dms_vpc_role_attachment,
+    aws_iam_role_policy_attachment.dms_cloudwatch_logs_role_attachment
   ]
 }

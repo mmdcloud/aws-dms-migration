@@ -1,5 +1,5 @@
 resource "google_compute_global_address" "carshub_sql_private_ip_address" {
-  name          = "carshub-sql-private-ip-address"
+  name          = "cloud-sql-private-ip-address"
   purpose       = "VPC_PEERING"
   address_type  = "INTERNAL"
   prefix_length = 16
