@@ -273,12 +273,19 @@ module "dms_replication_instance" {
   replication_instance_id    = "dms-instance"
   vpc_security_group_ids     = [aws_security_group.dms_sg.id]
 
+  replication_subnet_group_id          = "dms-subnet-group"
+  replication_subnet_group_description = "Subnet group for DMS"
+  subnet_group_ids = [
+    module.destination_public_subnets.subnets[0].id,
+    module.destination_public_subnets.subnets[1].id
+  ]
+
   source_endpoint_id   = "cloudsql-source"
   source_endpoint_type = "source"
   source_engine_name   = "mysql"
   source_username      = tostring(data.vault_generic_secret.cloudsql.data["username"])
   source_password      = tostring(data.vault_generic_secret.cloudsql.data["password"])
-  source_server_name   = module.source_db.public_ip_address
+  source_server_name   = "${module.source_db.public_ip_address}"
   source_port          = 3306
   source_ssl_mode      = "none"
 
@@ -287,7 +294,7 @@ module "dms_replication_instance" {
   destination_engine_name   = "mysql"
   destination_username      = tostring(data.vault_generic_secret.rds.data["username"])
   destination_password      = tostring(data.vault_generic_secret.rds.data["password"])
-  destination_server_name   = module.destination_db.endpoint
+  destination_server_name   = "${module.destination_db.endpoint}"
   destination_port          = 3306
   destination_ssl_mode      = "none"
 
@@ -316,6 +323,8 @@ module "dms_replication_instance" {
   ]
   depends_on = [
     aws_iam_role_policy_attachment.dms_vpc_role_attachment,
-    aws_iam_role_policy_attachment.dms_cloudwatch_logs_role_attachment
+    aws_iam_role_policy_attachment.dms_cloudwatch_logs_role_attachment,
+    module.source_db,
+    module.destination_db
   ]
 }

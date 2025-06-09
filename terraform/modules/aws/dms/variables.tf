@@ -23,6 +23,20 @@ variable "destination_server_name"{}
 variable "destination_port"{}
 variable "destination_ssl_mode"{}
 
+variable "subnet_group_ids" {
+  type = list(string)
+  description = "List of subnet IDs for the DMS replication subnet group"
+}
+
+variable "replication_subnet_group_id"{
+    description = "ID of the DMS replication subnet group"
+    type        = string
+}
+variable "replication_subnet_group_description"{
+    description = "Description of the DMS replication subnet group"
+    type        = string
+}
+
 variable "tasks" {
   
 }

@@ -6,6 +6,7 @@ resource "aws_dms_replication_instance" "dms" {
   replication_instance_class   = var.replication_instance_class
   replication_instance_id      = var.replication_instance_id
   vpc_security_group_ids       = var.vpc_security_group_ids
+  replication_subnet_group_id = aws_dms_replication_subnet_group.dms.replication_subnet_group_id
 }
 
 resource "aws_dms_endpoint" "source" {
@@ -30,11 +31,11 @@ resource "aws_dms_endpoint" "target" {
   ssl_mode      = var.destination_ssl_mode
 }
 
-# resource "aws_dms_replication_subnet_group" "dms" {
-#   replication_subnet_group_id          = "dms-subnet-group"
-#   replication_subnet_group_description = "Subnet group for DMS"
-#   subnet_ids                          = ["subnet-12345678", "subnet-87654321"]
-# }
+resource "aws_dms_replication_subnet_group" "dms" {
+  replication_subnet_group_id          = var.replication_subnet_group_id
+  replication_subnet_group_description = var.replication_subnet_group_description
+  subnet_ids                          = var.subnet_group_ids
+}
 
 resource "aws_dms_replication_task" "task" {
   count = length(var.tasks)
