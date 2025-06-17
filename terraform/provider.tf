@@ -22,7 +22,7 @@ provider "aws" {
 
 provider "google" {
   region  = "us-central1"
-  project = "orbital-bee-455915-h5"
+  project = "encoded-alpha-457108-e8"
 }
 
 provider "vault" {}

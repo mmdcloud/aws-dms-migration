@@ -53,7 +53,7 @@ module "source_db" {
   db_version                  = "MYSQL_8_0"
   location                    = var.source_location
   tier                        = "db-f1-micro"
-  ipv4_enabled                = false
+  ipv4_enabled                = true
   availability_type           = "ZONAL"
   disk_size                   = 10
   deletion_protection_enabled = false
@@ -285,7 +285,7 @@ module "dms_replication_instance" {
   source_engine_name   = "mysql"
   source_username      = tostring(data.vault_generic_secret.cloudsql.data["username"])
   source_password      = tostring(data.vault_generic_secret.cloudsql.data["password"])
-  source_server_name   = "${module.source_db.public_ip_address}"
+  source_server_name   = module.source_db.public_ip_address
   source_port          = 3306
   source_ssl_mode      = "none"
 
@@ -294,7 +294,7 @@ module "dms_replication_instance" {
   destination_engine_name   = "mysql"
   destination_username      = tostring(data.vault_generic_secret.rds.data["username"])
   destination_password      = tostring(data.vault_generic_secret.rds.data["password"])
-  destination_server_name   = "${module.destination_db.endpoint}"
+  destination_server_name   = module.destination_db.endpoint
   destination_port          = 3306
   destination_ssl_mode      = "none"
 
@@ -302,23 +302,33 @@ module "dms_replication_instance" {
     {
       migration_type      = "full-load"
       replication_task_id = "cloudsql-to-rds-task"
-      table_mappings = jsonencode({
-        "rules" : [
-          {
-            "rule-type" : "selection",
-            "rule-id" : "1",
-            "rule-name" : "1",
-            "rule-action" : "include",
-            "filters" : [
-              {
-                "filter-type" : "source",
-                "table-name" : "%",
-                "schema-name" : "%"
-              }
-            ]
-          }
-        ]
-      })
+      table_mappings = jsonencode(
+        {
+          "rules" : [
+            {
+              "rule-type" : "selection",
+              "rule-id" : "1",
+              "rule-name" : "1",
+              "object-locator" : {
+                "schema-name" : "%",
+                "table-name" : "%"
+              },
+              "rule-action" : "include"
+            },
+            {
+              "rule-type" : "transformation",
+              "rule-id" : "2",
+              "rule-name" : "2",
+              "object-locator" : {
+                "schema-name" : "%",
+                "table-name" : "%"
+              },
+              "rule-action" : "convert-lowercase",
+              "rule-target" : "schema"
+            }
+          ]
+        }
+      )
     }
   ]
   depends_on = [
