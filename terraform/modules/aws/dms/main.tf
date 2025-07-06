@@ -2,6 +2,7 @@
 resource "aws_dms_replication_instance" "dms" {
   allocated_storage            = var.allocated_storage
   apply_immediately            = var.apply_immediately
+  publicly_accessible = var.publicly_accessible
   engine_version               = var.engine_version
   replication_instance_class   = var.replication_instance_class
   replication_instance_id      = var.replication_instance_id

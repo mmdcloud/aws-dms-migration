@@ -203,7 +203,7 @@ module "destination_db" {
     module.destination_public_subnets.subnets[1].id
   ]
   vpc_security_group_ids = [module.destination_rds_sg.id]
-  publicly_accessible    = false
+  publicly_accessible    = true
   skip_final_snapshot    = true
 }
 
@@ -268,6 +268,7 @@ module "dms_replication_instance" {
   source                     = "./modules/aws/dms"
   allocated_storage          = 20
   apply_immediately          = false
+  publicly_accessible        = true
   replication_instance_class = "dms.t3.micro"
   engine_version             = "3.6.1"
   replication_instance_id    = "dms-instance"

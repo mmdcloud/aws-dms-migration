@@ -22,7 +22,10 @@ variable "destination_password"{}
 variable "destination_server_name"{}
 variable "destination_port"{}
 variable "destination_ssl_mode"{}
-
+variable "publicly_accessible" {
+  type        = bool
+  description = "Whether the DMS replication instance is publicly accessible"
+}
 variable "subnet_group_ids" {
   type = list(string)
   description = "List of subnet IDs for the DMS replication subnet group"

@@ -55,10 +55,10 @@ resource "google_sql_database_instance" "db_instance" {
       ipv4_enabled                                  = var.ipv4_enabled
       private_network                               = var.vpc_self_link
       enable_private_path_for_google_cloud_services = false
-      # authorized_networks {
-      #   name  = "all"
-      #   value = "0.0.0.0/0"
-      # }
+      authorized_networks {
+        name  = "all"
+        value = "0.0.0.0/0"
+      }
     }
   }
   deletion_protection = false
