@@ -1,0 +1,66 @@
+digraph INFRA {
+  node [ color = "black", fillcolor = "#E6E6E6", height =1, style = "filled,bold,rounded", fontname = "Arial" ];
+  "source-vpc" [ label = "source-vpc
+(google_compute_network)", shape =rectangle ];
+  "source-public-subnet" [ label = "source-public-subnet
+(google_compute_subnetwork)", shape =rectangle ];
+  "source-private-subnet" [ label = "source-private-subnet
+(google_compute_subnetwork)", shape =rectangle ];
+  "source_db_password_secret" [ label = "source_db_password_secret
+(google_secret_manager_secret)", shape =cylinder, fillcolor = "#FFF5CD" ];
+  "source-db" [ label = "source-db
+(google_sql_database_instance)", shape =cylinder, fillcolor = "#FFCFB3" ];
+  "destination-vpc" [ label = "destination-vpc
+(AWS::EC2::VPC)", shape =rectangle ];
+  "destination_rds_sg" [ label = "destination_rds_sg
+(AWS::EC2::SecurityGroup)", shape =rectangle ];
+  "destination public subnet" [ label = "destination public subnet
+(AWS::EC2::Subnet)", shape =rectangle ];
+  "destination private subnet" [ label = "destination private subnet
+(AWS::EC2::Subnet)", shape =rectangle ];
+  "destination public route table" [ label = "destination public route table
+(AWS::EC2::RouteTable)", shape =rectangle ];
+  "destination private route table" [ label = "destination private route table
+(AWS::EC2::RouteTable)", shape =rectangle ];
+  "destination_rds_secrets" [ label = "destination_rds_secrets
+(AWS::SecretsManager::Secret)", shape =cylinder, fillcolor = "#FFF5CD" ];
+  "destinationdb" [ label = "destinationdb
+(AWS::RDS::DBInstance)", shape =cylinder, fillcolor = "#FFCFB3" ];
+  "dms-vpc-role" [ label = "dms-vpc-role
+(AWS::IAM::Role)", shape =rectangle ];
+  "dms-cloudwatch-logs-role" [ label = "dms-cloudwatch-logs-role
+(AWS::IAM::Role)", shape =rectangle ];
+  "dms-security-group" [ label = "dms-security-group
+(AWS::EC2::SecurityGroup)", shape =rectangle ];
+  "dms-instance" [ label = "dms-instance
+(AWS::DMS::ReplicationInstance)", shape =rectangle, fillcolor = "#B7E0FF" ];
+  "cloudsql-source" [ label = "cloudsql-source
+(AWS::DMS::Endpoint)", shape =rectangle, fillcolor = "#E78F81" ];
+  "rds" [ label = "rds
+(AWS::DMS::Endpoint)", shape =rectangle, fillcolor = "#E78F81" ];
+  "cloudsql-to-rds-task" [ label = "cloudsql-to-rds-task
+(AWS::DMS::ReplicationTask)", shape =rectangle, fillcolor = "#B7E0FF" ];
+  "source-public-subnet" -> "source-vpc";
+  "source-private-subnet" -> "source-vpc";
+  "source-db" -> "source-vpc";
+  "source-db" -> "source_db_password_secret";
+  "destination_rds_sg" -> "destination-vpc";
+  "destination public subnet" -> "destination-vpc";
+  "destination private subnet" -> "destination-vpc";
+  "destination public route table" -> "destination-vpc";
+  "destination public route table" -> "destination public subnet";
+  "destination private route table" -> "destination-vpc";
+  "destination private route table" -> "destination private subnet";
+  "destinationdb" -> "destination-vpc";
+  "destinationdb" -> "destination_rds_sg";
+  "destinationdb" -> "destination public subnet";
+  "dms-security-group" -> "destination-vpc";
+  "dms-instance" -> "destination-vpc";
+  "dms-instance" -> "dms-security-group";
+  "dms-instance" -> "destination public subnet";
+  "cloudsql-source" -> "source-db";
+  "rds" -> "destinationdb";
+  "cloudsql-to-rds-task" -> "dms-instance";
+  "cloudsql-to-rds-task" -> "cloudsql-source";
+  "cloudsql-to-rds-task" -> "rds";
+}
