@@ -47,8 +47,8 @@ module "source_cloudsql_password_secret" {
 # Cloud SQL
 module "source_db" {
   source                      = "./modules/gcp/cloud-sql"
-  name                        = "source-db"
-  db_name                     = "source-db"
+  name                        = var.source_db
+  db_name                     = var.source_db
   db_user                     = "mohit"
   db_version                  = "MYSQL_8_0"
   location                    = var.source_location
@@ -186,7 +186,7 @@ module "destination_db_credentials" {
 # RDS Instance
 module "destination_db" {
   source                  = "./modules/aws/rds"
-  db_name                 = "destinationdb"
+  db_name                 = var.destination_db
   allocated_storage       = 20
   engine                  = "mysql"
   engine_version          = "8.0"
@@ -311,7 +311,7 @@ module "dms_replication_instance" {
               "rule-id" : "1",
               "rule-name" : "include-source-db",
               "object-locator" : {
-                "schema-name" : "source-db",
+                "schema-name" : "${var.source_db}",
                 "table-name" : "%"
               },
               "rule-action" : "include"
