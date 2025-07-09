@@ -88,9 +88,9 @@ module "destination_rds_sg" {
       to_port         = 3306
       protocol        = "tcp"
       self            = "false"
-      cidr_blocks     = ["0.0.0.0/0"]
+      cidr_blocks     = ["10.0.0.0/16"]
       security_groups = []
-      description     = "any"
+      description     = "MySQL from VPC"
     }
   ]
   egress = [
@@ -131,16 +131,16 @@ module "destination_private_subnets" {
   name   = "destination private subnet"
   subnets = [
     {
-      subnet = "10.0.6.0/24"
-      az     = "us-east-1d"
+      subnet = "10.0.4.0/24"
+      az     = "us-east-1a"
     },
     {
       subnet = "10.0.5.0/24"
-      az     = "us-east-1e"
+      az     = "us-east-1b"
     },
     {
-      subnet = "10.0.4.0/24"
-      az     = "us-east-1f"
+      subnet = "10.0.6.0/24"
+      az     = "us-east-1c"
     }
   ]
   vpc_id                  = module.destination_vpc.vpc_id
@@ -165,7 +165,7 @@ module "destination_public_rt" {
 # Destination Private Route Table
 module "destination_private_rt" {
   source  = "./modules/aws/vpc/route_tables"
-  name    = "destination public route table"
+  name    = "destination private route table"
   subnets = module.destination_private_subnets.subnets[*]
   routes  = []
   vpc_id  = module.destination_vpc.vpc_id
@@ -199,11 +199,11 @@ module "destination_db" {
   backup_retention_period = 7
   backup_window           = "03:00-05:00"
   subnet_group_ids = [
-    module.destination_public_subnets.subnets[0].id,
-    module.destination_public_subnets.subnets[1].id
+    module.destination_private_subnets.subnets[0].id,
+    module.destination_private_subnets.subnets[1].id
   ]
   vpc_security_group_ids = [module.destination_rds_sg.id]
-  publicly_accessible    = true
+  publicly_accessible    = false
   skip_final_snapshot    = true
 }
 
