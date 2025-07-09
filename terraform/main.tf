@@ -71,7 +71,7 @@ module "source_db" {
 module "destination_vpc" {
   source                = "./modules/aws/vpc/vpc"
   vpc_name              = "destination-vpc"
-  vpc_cidr_block        = "10.0.0.0/16"
+  vpc_cidr_block        = "0.0.0.0/0"
   enable_dns_hostnames  = true
   enable_dns_support    = true
   internet_gateway_name = "destination_vpc_igw"
@@ -199,11 +199,11 @@ module "destination_db" {
   backup_retention_period = 7
   backup_window           = "03:00-05:00"
   subnet_group_ids = [
-    module.destination_private_subnets.subnets[0].id,
-    module.destination_private_subnets.subnets[1].id
+    module.destination_public_subnets.subnets[0].id,
+    module.destination_public_subnets.subnets[1].id
   ]
   vpc_security_group_ids = [module.destination_rds_sg.id]
-  publicly_accessible    = false
+  publicly_accessible    = true
   skip_final_snapshot    = true
 }
 
@@ -309,24 +309,14 @@ module "dms_replication_instance" {
             {
               "rule-type" : "selection",
               "rule-id" : "1",
-              "rule-name" : "1",
+              "rule-name" : "include-source-db",
               "object-locator" : {
-                "schema-name" : "%",
+                "schema-name" : "source-db",
                 "table-name" : "%"
               },
               "rule-action" : "include"
-            },
-            {
-              "rule-type" : "transformation",
-              "rule-id" : "2",
-              "rule-name" : "2",
-              "object-locator" : {
-                "schema-name" : "%",
-                "table-name" : "%"
-              },
-              "rule-action" : "convert-lowercase",
-              "rule-target" : "schema"
             }
+
           ]
         }
       )
