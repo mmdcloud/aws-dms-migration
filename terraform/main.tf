@@ -8,6 +8,18 @@ data "vault_generic_secret" "cloudsql" {
   path = "secret/sql"
 }
 
+# SNS Configuration
+module "sns" {
+  source     = "./modules/sns"
+  topic_name = "dms-job-status-change-topic"
+  subscriptions = [
+    {
+      protocol = "email"
+      endpoint = "madmaxcloudonline@gmail.com"
+    }
+  ]
+}
+
 # ------------------------ GCP Configuration ------------------------
 
 # VPC Creation
@@ -322,10 +334,21 @@ module "dms_replication_instance" {
       )
     }
   ]
+
   depends_on = [
     aws_iam_role_policy_attachment.dms_vpc_role_attachment,
     aws_iam_role_policy_attachment.dms_cloudwatch_logs_role_attachment,
     module.source_db,
     module.destination_db
   ]
+}
+
+resource "aws_dms_event_subscription" "subscription" {
+  enabled          = true
+  event_categories = ["creation", "deletion", "failure"]
+  name             = "dms-event-subscription"
+  sns_topic_arn    = "${module.sns.topic_arn}"
+  source_ids       = [module.dms_replication_instance.replication_instance_id]
+  source_type      = "replication-instance"
+  depends_on = [module.dms_replication_instance]
 }
