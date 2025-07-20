@@ -347,8 +347,45 @@ resource "aws_dms_event_subscription" "subscription" {
   enabled          = true
   event_categories = ["creation", "deletion", "failure"]
   name             = "dms-event-subscription"
-  sns_topic_arn    = "${module.sns.topic_arn}"
+  sns_topic_arn    = module.sns.topic_arn
   source_ids       = [module.dms_replication_instance.replication_instance_id]
   source_type      = "replication-instance"
-  depends_on = [module.dms_replication_instance]
+  depends_on       = [module.dms_replication_instance]
+}
+
+# ------------------------ VPN Configuration ------------------------
+
+resource "aws_customer_gateway" "gcp_gateway" {
+  bgp_asn    = 65000          # Replace with your on-premises router's BGP ASN
+  ip_address = "203.0.113.12" # Replace with your on-premises public IP
+  type       = "ipsec.1"
+
+  tags = {
+    Name = var.gcp_gateway_name
+  }
+}
+
+resource "aws_vpn_gateway" "vpn_gw" {
+  vpc_id = module.destination_vpc.vpc_id
+
+  tags = {
+    Name = var.aws_vpn_gateway_name
+  }
+}
+
+resource "aws_vpn_connection" "vpn_connection" {
+  vpn_gateway_id      = aws_vpn_gateway.vpn_gw.id
+  customer_gateway_id = aws_customer_gateway.gcp_gateway.id
+  type                = "ipsec.1"
+  static_routes_only  = false # Set to true if not using BGP
+
+  # Tunnel configuration (optional but recommended)
+  tunnel1_inside_cidr   = "169.254.100.0/30"
+  tunnel1_preshared_key = "replacewithyoursecretkey1"
+  tunnel2_inside_cidr   = "169.254.200.0/30"
+  tunnel2_preshared_key = "replacewithyoursecretkey2"
+
+  tags = {
+    Name = var.aws_vpn_connection_name
+  }
 }
