@@ -355,37 +355,232 @@ resource "aws_dms_event_subscription" "subscription" {
 
 # ------------------------ VPN Configuration ------------------------
 
-resource "aws_customer_gateway" "gcp_gateway" {
-  bgp_asn    = 65000          # Replace with your on-premises router's BGP ASN
-  ip_address = "203.0.113.12" # Replace with your on-premises public IP
+# Create a customer gateway representing the GCP side
+resource "aws_customer_gateway" "gcp_cgw_1" {
+  bgp_asn    = 65534
+  ip_address = google_compute_ha_vpn_gateway.gcp_vpn_gateway.vpn_interfaces[0].ip_address
   type       = "ipsec.1"
 
   tags = {
-    Name = var.gcp_gateway_name
+    Name = "aws-customer-gw-1"
   }
+
+  # This depends on the GCP VPN gateway being created first
+  depends_on = [google_compute_ha_vpn_gateway.gcp_vpn_gateway]
 }
 
-resource "aws_vpn_gateway" "vpn_gw" {
-  vpc_id = module.destination_vpc.vpc_id
+resource "aws_customer_gateway" "gcp_cgw_2" {
+  bgp_asn    = 65534
+  ip_address = google_compute_ha_vpn_gateway.gcp_vpn_gateway.vpn_interfaces[1].ip_address
+  type       = "ipsec.1"
 
   tags = {
-    Name = var.aws_vpn_gateway_name
+    Name = "aws-customer-gw-2"
+  }
+
+  # This depends on the GCP VPN gateway being created first
+  depends_on = [google_compute_ha_vpn_gateway.gcp_vpn_gateway]
+}
+
+# Create a VPN gateway in AWS
+resource "aws_vpn_gateway" "aws_vpn_gw" {
+  vpc_id          = module.destination_vpc.vpc_id
+  amazon_side_asn = 65001
+  tags = {
+    Name = "aws-vpn-gateway"
   }
 }
 
-resource "aws_vpn_connection" "vpn_connection" {
-  vpn_gateway_id      = aws_vpn_gateway.vpn_gw.id
-  customer_gateway_id = aws_customer_gateway.gcp_gateway.id
+# Create a VPN connection to GCP
+resource "aws_vpn_connection" "vpn_connection_1" {
+  vpn_gateway_id      = aws_vpn_gateway.aws_vpn_gw.id
+  customer_gateway_id = aws_customer_gateway.gcp_cgw_1.id
   type                = "ipsec.1"
-  static_routes_only  = false # Set to true if not using BGP
-
-  # Tunnel configuration (optional but recommended)
-  tunnel1_inside_cidr   = "169.254.100.0/30"
-  tunnel1_preshared_key = "replacewithyoursecretkey1"
-  tunnel2_inside_cidr   = "169.254.200.0/30"
-  tunnel2_preshared_key = "replacewithyoursecretkey2"
-
   tags = {
-    Name = var.aws_vpn_connection_name
+    Name = "vpn-connection-1"
   }
+}
+
+resource "aws_vpn_connection" "vpn_connection_2" {
+  vpn_gateway_id      = aws_vpn_gateway.aws_vpn_gw.id
+  customer_gateway_id = aws_customer_gateway.gcp_cgw_2.id
+  type                = "ipsec.1"
+  tags = {
+    Name = "vpn-connection-2"
+  }
+}
+
+resource "aws_vpn_gateway_attachment" "vpn_attachment" {
+  vpn_gateway_id = aws_vpn_gateway.aws_vpn_gw.id
+  vpc_id         = module.destination_vpc.vpc_id
+}
+
+# Create a HA VPN gateway in GCP
+resource "google_compute_ha_vpn_gateway" "gcp_vpn_gateway" {
+  name    = "gcp-vpn-gateway"
+  network = module.source_vpc.vpc_id
+  region  = "us-central1"
+}
+
+# Create a cloud router for BGP (optional)
+resource "google_compute_router" "gcp_router" {
+  name    = "gcp-vpn-router"
+  network = module.source_vpc.vpc_id
+  region  = "us-central1"
+  bgp {
+    advertise_mode    = "CUSTOM"
+    advertised_groups = ["ALL_SUBNETS"]
+    asn               = 65534
+  }
+}
+
+# Create external VPN gateway representing the AWS side
+resource "google_compute_external_vpn_gateway" "aws_vpn_gateway_1" {
+  name            = "aws-vpn-gateway-1"
+  redundancy_type = "TWO_IPS_REDUNDANCY"
+  description     = "AWS VPN Gateway 1"
+  interface {
+    id         = 0
+    ip_address = aws_vpn_connection.vpn_connection_1.tunnel1_address
+  }
+  interface {
+    id         = 1
+    ip_address = aws_vpn_connection.vpn_connection_1.tunnel2_address
+  }
+}
+
+resource "google_compute_external_vpn_gateway" "aws_vpn_gateway_2" {
+  name            = "aws-vpn-gateway-2"
+  redundancy_type = "TWO_IPS_REDUNDANCY"
+  description     = "AWS VPN Gateway 2"
+  interface {
+    id         = 0
+    ip_address = aws_vpn_connection.vpn_connection_2.tunnel1_address
+  }
+  interface {
+    id         = 1
+    ip_address = aws_vpn_connection.vpn_connection_2.tunnel2_address
+  }
+}
+
+# Create VPN tunnels on GCP side
+resource "google_compute_vpn_tunnel" "gcp_tunnel1" {
+  name                            = "gcp-tunnel1"
+  region                          = "us-central1"
+  vpn_gateway                     = google_compute_ha_vpn_gateway.gcp_vpn_gateway.id
+  peer_external_gateway           = google_compute_external_vpn_gateway.aws_vpn_gateway_1.id
+  peer_external_gateway_interface = 0
+  ike_version                     = 2
+  shared_secret                   = aws_vpn_connection.vpn_connection_1.tunnel1_preshared_key
+  router                          = google_compute_router.gcp_router.id
+  vpn_gateway_interface           = 0
+}
+
+resource "google_compute_vpn_tunnel" "gcp_tunnel2" {
+  name                            = "gcp-tunnel2"
+  region                          = "us-central1"
+  vpn_gateway                     = google_compute_ha_vpn_gateway.gcp_vpn_gateway.id
+  peer_external_gateway           = google_compute_external_vpn_gateway.aws_vpn_gateway_1.id
+  peer_external_gateway_interface = 0
+  ike_version                     = 2
+  shared_secret                   = aws_vpn_connection.vpn_connection_1.tunnel2_preshared_key
+  router                          = google_compute_router.gcp_router.id
+  vpn_gateway_interface           = 0
+}
+
+resource "google_compute_vpn_tunnel" "gcp_tunnel3" {
+  name                            = "gcp-tunnel3"
+  region                          = "us-central1"
+  vpn_gateway                     = google_compute_ha_vpn_gateway.gcp_vpn_gateway.id
+  peer_external_gateway           = google_compute_external_vpn_gateway.aws_vpn_gateway_2.id
+  peer_external_gateway_interface = 1
+  ike_version                     = 2
+  shared_secret                   = aws_vpn_connection.vpn_connection_2.tunnel1_preshared_key
+  router                          = google_compute_router.gcp_router.id
+  vpn_gateway_interface           = 1
+}
+
+resource "google_compute_vpn_tunnel" "gcp_tunnel4" {
+  name                            = "gcp-tunnel4"
+  region                          = "us-central1"
+  vpn_gateway                     = google_compute_ha_vpn_gateway.gcp_vpn_gateway.id
+  peer_external_gateway           = google_compute_external_vpn_gateway.aws_vpn_gateway_2.id
+  peer_external_gateway_interface = 1
+  ike_version                     = 2
+  shared_secret                   = aws_vpn_connection.vpn_connection_2.tunnel2_preshared_key
+  router                          = google_compute_router.gcp_router.id
+  vpn_gateway_interface           = 1
+}
+
+# Create BGP sessions (optional)
+resource "google_compute_router_peer" "gcp_bgp_peer1" {
+  name                      = "gcp-bgp-peer1"
+  router                    = google_compute_router.gcp_router.name
+  region                    = "us-central1"
+  peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel1_vgw_inside_address
+  peer_asn                  = 65001
+  advertised_route_priority = 100
+  interface                 = google_compute_router_interface.gcp_interface1.name
+}
+
+resource "google_compute_router_peer" "gcp_bgp_peer2" {
+  name                      = "gcp-bgp-peer2"
+  router                    = google_compute_router.gcp_router.name
+  region                    = "us-central1"
+  peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel2_vgw_inside_address
+  peer_asn                  = 65001
+  advertised_route_priority = 100
+  interface                 = google_compute_router_interface.gcp_interface2.name
+}
+
+resource "google_compute_router_peer" "gcp_bgp_peer3" {
+  name                      = "gcp-bgp-peer3"
+  router                    = google_compute_router.gcp_router.name
+  region                    = "us-central1"
+  peer_ip_address           = aws_vpn_connection.vpn_connection_2.tunnel1_vgw_inside_address
+  peer_asn                  = 65001
+  advertised_route_priority = 100
+  interface                 = google_compute_router_interface.gcp_interface3.name
+}
+
+resource "google_compute_router_peer" "gcp_bgp_peer4" {
+  name                      = "gcp-bgp-peer4"
+  router                    = google_compute_router.gcp_router.name
+  region                    = "us-central1"
+  peer_ip_address           = aws_vpn_connection.vpn_connection_2.tunnel2_vgw_inside_address
+  peer_asn                  = 65001
+  advertised_route_priority = 100
+  interface                 = google_compute_router_interface.gcp_interface4.name
+}
+
+resource "google_compute_router_interface" "gcp_interface1" {
+  name       = "gcp-interface1"
+  router     = google_compute_router.gcp_router.name
+  region     = "us-central1"
+  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel1_cgw_inside_address}/24"
+  vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel1.name
+}
+
+resource "google_compute_router_interface" "gcp_interface2" {
+  name       = "gcp-interface2"
+  router     = google_compute_router.gcp_router.name
+  region     = "us-central1"
+  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel2_cgw_inside_address}/24"
+  vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel2.name
+}
+
+resource "google_compute_router_interface" "gcp_interface3" {
+  name       = "gcp-interface3"
+  router     = google_compute_router.gcp_router.name
+  region     = "us-central1"
+  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel1_cgw_inside_address}/24"
+  vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel3.name
+}
+
+resource "google_compute_router_interface" "gcp_interface4" {
+  name       = "gcp-interface4"
+  router     = google_compute_router.gcp_router.name
+  region     = "us-central1"
+  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel2_cgw_inside_address}/24"
+  vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel4.name
 }
