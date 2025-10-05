@@ -19,7 +19,7 @@ resource "google_sql_database_instance" "db_instance" {
   region           = var.location
   database_version = var.db_version
   root_password    = var.password
-  settings {
+  settings {    
     tier                        = var.tier
     availability_type           = var.availability_type
     disk_size                   = var.disk_size
@@ -60,7 +60,7 @@ resource "google_sql_database_instance" "db_instance" {
         value = "0.0.0.0/0"
       }
     }
-  }
+  }  
   deletion_protection = false
   depends_on          = [google_service_networking_connection.private_vpc_connection]
 }

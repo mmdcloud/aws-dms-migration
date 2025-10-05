@@ -1,52 +1,40 @@
-# Registering vault provider
-data "vault_generic_secret" "rds" {
-  path = "secret/rds"
-}
+# ------------------------------------------------------------------------
+# GCP Configuration
+# ------------------------------------------------------------------------
 
-# Registering vault provider
 data "vault_generic_secret" "cloudsql" {
   path = "secret/sql"
 }
 
-# SNS Configuration
-module "sns" {
-  source     = "./modules/sns"
-  topic_name = "dms-job-status-change-topic"
-  subscriptions = [
-    {
-      protocol = "email"
-      endpoint = "madmaxcloudonline@gmail.com"
-    }
-  ]
-}
-
-# ------------------------ GCP Configuration ------------------------
-
 # VPC Creation
 module "source_vpc" {
-  source                  = "./modules/gcp/network/vpc"
-  auto_create_subnetworks = false
-  vpc_name                = "source-vpc"
-  routing_mode            = "REGIONAL"
-}
-
-# Subnets Creation
-module "source_vpc_public_subnets" {
-  source                   = "./modules/gcp/network/subnet"
-  name                     = "source-public-subnet"
-  subnets                  = var.source_public_subnets
-  vpc_id                   = module.source_vpc.vpc_id
-  private_ip_google_access = false
-  location                 = var.source_location
-}
-
-module "source_vpc_private_subnets" {
-  source                   = "./modules/gcp/network/subnet"
-  name                     = "source-private-subnet"
-  subnets                  = var.source_private_subnets
-  vpc_id                   = module.source_vpc.vpc_id
-  private_ip_google_access = true
-  location                 = var.source_location
+  source                          = "./modules/gcp/vpc"
+  vpc_name                        = "source-vpc"
+  delete_default_routes_on_create = false
+  auto_create_subnetworks         = false
+  routing_mode                    = "REGIONAL"
+  subnets = [
+    {
+      ip_cidr_range            = "10.1.0.0/16"
+      name                     = "source-public-subnet"
+      private_ip_google_access = false
+      purpose                  = "PRIVATE"
+      region                   = var.source_location
+      role                     = "ACTIVE"
+    }
+  ]
+  firewall_data = [
+    {
+      name          = "vpc-firewall-ssh"
+      source_ranges = ["0.0.0.0/0"]
+      allow_list = [
+        {
+          protocol = "tcp"
+          ports    = ["22"]
+        }
+      ]
+    }
+  ]
 }
 
 # Secret Manager
@@ -77,13 +65,19 @@ module "source_db" {
   database_flags              = []
 }
 
-# ------------------------ AWS Configuration ------------------------
+# ------------------------------------------------------------------------
+# AWS Configuration
+# ------------------------------------------------------------------------
+
+data "vault_generic_secret" "rds" {
+  path = "secret/rds"
+}
 
 # VPC Configuration
 module "destination_vpc" {
   source                = "./modules/aws/vpc/vpc"
   vpc_name              = "destination-vpc"
-  vpc_cidr_block        = "0.0.0.0/0"
+  vpc_cidr_block        = "10.0.0.0/16"
   enable_dns_hostnames  = true
   enable_dns_support    = true
   internet_gateway_name = "destination_vpc_igw"
@@ -219,9 +213,23 @@ module "destination_db" {
   skip_final_snapshot    = true
 }
 
-# --------------------------- DMS Configuration ---------------------------
+# SNS Configuration
+module "sns" {
+  source     = "./modules/sns"
+  topic_name = "dms-job-status-change-topic"
+  subscriptions = [
+    {
+      protocol = "email"
+      endpoint = "madmaxcloudonline@gmail.com"
+    }
+  ]
+}
 
-# 1. Create DMS VPC Role
+# ------------------------------------------------------------------------
+# DMS Configuration
+# ------------------------------------------------------------------------
+
+# DMS VPC Role
 resource "aws_iam_role" "dms_vpc_role" {
   name               = "dms-vpc-role"
   assume_role_policy = data.aws_iam_policy_document.dms_assume_role.json
@@ -238,13 +246,12 @@ data "aws_iam_policy_document" "dms_assume_role" {
   }
 }
 
-# 2. Attach the required AWS managed policy
 resource "aws_iam_role_policy_attachment" "dms_vpc_role_attachment" {
   role       = aws_iam_role.dms_vpc_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSVPCManagementRole"
 }
 
-# 3. Create DMS CloudWatch Logs Role (if needed)
+# DMS CloudWatch Logs Role (if needed)
 resource "aws_iam_role" "dms_cloudwatch_logs_role" {
   name               = "dms-cloudwatch-logs-role"
   assume_role_policy = data.aws_iam_policy_document.dms_assume_role.json
@@ -264,7 +271,7 @@ resource "aws_security_group" "dms_sg" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["10.0.0.0/16"] # Adjust to your VPC CIDR
+    cidr_blocks = ["10.0.0.0/16"]
   }
 
   egress {
@@ -345,7 +352,7 @@ module "dms_replication_instance" {
 
 resource "aws_dms_event_subscription" "subscription" {
   enabled          = true
-  event_categories = ["creation", "deletion", "failure"]
+  event_categories = ["creation", "deletion", "failure", "state-change"]
   name             = "dms-event-subscription"
   sns_topic_arn    = module.sns.topic_arn
   source_ids       = [module.dms_replication_instance.replication_instance_id]
@@ -353,7 +360,9 @@ resource "aws_dms_event_subscription" "subscription" {
   depends_on       = [module.dms_replication_instance]
 }
 
-# ------------------------ VPN Configuration ------------------------
+# ------------------------------------------------------------------------
+# VPN Configuration
+# ------------------------------------------------------------------------
 
 # Create a customer gateway representing the GCP side
 resource "aws_customer_gateway" "gcp_cgw_1" {
@@ -481,7 +490,7 @@ resource "google_compute_vpn_tunnel" "gcp_tunnel2" {
   region                          = "us-central1"
   vpn_gateway                     = google_compute_ha_vpn_gateway.gcp_vpn_gateway.id
   peer_external_gateway           = google_compute_external_vpn_gateway.aws_vpn_gateway_1.id
-  peer_external_gateway_interface = 0
+  peer_external_gateway_interface = 1
   ike_version                     = 2
   shared_secret                   = aws_vpn_connection.vpn_connection_1.tunnel2_preshared_key
   router                          = google_compute_router.gcp_router.id
@@ -493,7 +502,7 @@ resource "google_compute_vpn_tunnel" "gcp_tunnel3" {
   region                          = "us-central1"
   vpn_gateway                     = google_compute_ha_vpn_gateway.gcp_vpn_gateway.id
   peer_external_gateway           = google_compute_external_vpn_gateway.aws_vpn_gateway_2.id
-  peer_external_gateway_interface = 1
+  peer_external_gateway_interface = 0
   ike_version                     = 2
   shared_secret                   = aws_vpn_connection.vpn_connection_2.tunnel1_preshared_key
   router                          = google_compute_router.gcp_router.id
@@ -557,7 +566,7 @@ resource "google_compute_router_interface" "gcp_interface1" {
   name       = "gcp-interface1"
   router     = google_compute_router.gcp_router.name
   region     = "us-central1"
-  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel1_cgw_inside_address}/24"
+  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel1_cgw_inside_address}/30"
   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel1.name
 }
 
@@ -565,7 +574,7 @@ resource "google_compute_router_interface" "gcp_interface2" {
   name       = "gcp-interface2"
   router     = google_compute_router.gcp_router.name
   region     = "us-central1"
-  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel2_cgw_inside_address}/24"
+  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel2_cgw_inside_address}/30"
   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel2.name
 }
 
@@ -573,7 +582,7 @@ resource "google_compute_router_interface" "gcp_interface3" {
   name       = "gcp-interface3"
   router     = google_compute_router.gcp_router.name
   region     = "us-central1"
-  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel1_cgw_inside_address}/24"
+  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel1_cgw_inside_address}/30"
   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel3.name
 }
 
@@ -581,6 +590,6 @@ resource "google_compute_router_interface" "gcp_interface4" {
   name       = "gcp-interface4"
   router     = google_compute_router.gcp_router.name
   region     = "us-central1"
-  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel2_cgw_inside_address}/24"
+  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel2_cgw_inside_address}/30"
   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel4.name
 }
