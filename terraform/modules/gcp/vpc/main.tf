@@ -27,6 +27,6 @@ resource "google_compute_firewall" "firewall" {
       ports    = allow.value["ports"]
     }
   }
-
+  direction     = var.firewall_data[count.index].direction
   source_ranges = var.firewall_data[count.index].source_ranges
 }

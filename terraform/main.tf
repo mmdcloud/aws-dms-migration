@@ -16,7 +16,7 @@ module "source_vpc" {
   subnets = [
     {
       ip_cidr_range            = "10.1.0.0/16"
-      name                     = "source-public-subnet"
+      name                     = "source-subnet"
       private_ip_google_access = false
       purpose                  = "PRIVATE"
       region                   = var.source_location
@@ -25,12 +25,13 @@ module "source_vpc" {
   ]
   firewall_data = [
     {
-      name          = "vpc-firewall-ssh"
-      source_ranges = ["0.0.0.0/0"]
+      name          = "gcp-dms-firewall"
+      source_ranges = ["10.0.1.0/24", "10.0.2.0/24"]
+      direction     = "INGRESS"
       allow_list = [
         {
           protocol = "tcp"
-          ports    = ["22"]
+          ports    = ["3306"]
         }
       ]
     }
@@ -39,9 +40,9 @@ module "source_vpc" {
 
 # Secret Manager
 module "source_cloudsql_password_secret" {
+  secret_id   = "source_db_password_secret"
   source      = "./modules/gcp/secret-manager"
   secret_data = tostring(data.vault_generic_secret.cloudsql.data["password"])
-  secret_id   = "source_db_password_secret"
 }
 
 # Cloud SQL
@@ -205,17 +206,17 @@ module "destination_db" {
   backup_retention_period = 7
   backup_window           = "03:00-05:00"
   subnet_group_ids = [
-    module.destination_public_subnets.subnets[0].id,
-    module.destination_public_subnets.subnets[1].id
+    module.destination_private_subnets.subnets[0].id,
+    module.destination_private_subnets.subnets[1].id
   ]
   vpc_security_group_ids = [module.destination_rds_sg.id]
-  publicly_accessible    = true
+  publicly_accessible    = false
   skip_final_snapshot    = true
 }
 
 # SNS Configuration
 module "sns" {
-  source     = "./modules/sns"
+  source     = "./modules/aws/sns"
   topic_name = "dms-job-status-change-topic"
   subscriptions = [
     {
@@ -287,7 +288,7 @@ module "dms_replication_instance" {
   source                     = "./modules/aws/dms"
   allocated_storage          = 20
   apply_immediately          = false
-  publicly_accessible        = true
+  publicly_accessible        = false
   replication_instance_class = "dms.t3.micro"
   engine_version             = "3.6.1"
   replication_instance_id    = "dms-instance"
@@ -296,8 +297,8 @@ module "dms_replication_instance" {
   replication_subnet_group_id          = "dms-subnet-group"
   replication_subnet_group_description = "Subnet group for DMS"
   subnet_group_ids = [
-    module.destination_public_subnets.subnets[0].id,
-    module.destination_public_subnets.subnets[1].id
+    module.destination_private_subnets.subnets[0].id,
+    module.destination_private_subnets.subnets[1].id
   ]
 
   source_endpoint_id   = "cloudsql-source"
@@ -305,7 +306,7 @@ module "dms_replication_instance" {
   source_engine_name   = "mysql"
   source_username      = tostring(data.vault_generic_secret.cloudsql.data["username"])
   source_password      = tostring(data.vault_generic_secret.cloudsql.data["password"])
-  source_server_name   = module.source_db.public_ip_address
+  source_server_name   = module.source_db.private_ip_address
   source_port          = 3306
   source_ssl_mode      = "none"
 

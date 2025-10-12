@@ -22,3 +22,8 @@ output "public_ip_address" {
   value = google_sql_database_instance.db_instance.public_ip_address
   
 }
+
+output "private_ip_address" {
+  value = google_sql_database_instance.db_instance.private_ip_address
+  
+}
