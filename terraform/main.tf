@@ -1,7 +1,6 @@
 # ------------------------------------------------------------------------
 # GCP Configuration
 # ------------------------------------------------------------------------
-
 data "vault_generic_secret" "cloudsql" {
   path = "secret/sql"
 }
@@ -76,12 +75,22 @@ data "vault_generic_secret" "rds" {
 
 # VPC Configuration
 module "destination_vpc" {
-  source                = "./modules/aws/vpc/vpc"
-  vpc_name              = "destination-vpc"
-  vpc_cidr_block        = "10.0.0.0/16"
-  enable_dns_hostnames  = true
-  enable_dns_support    = true
-  internet_gateway_name = "destination_vpc_igw"
+  source = "./modules/aws/vpc"
+  vpc_name = "destination-vpc"
+  vpc_cidr = "10.0.0.0/16"
+  azs             = var.destination_azs
+  public_subnets  = var.destination_public_subnets
+  private_subnets = var.destination_private_subnets
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  create_igw = true
+  map_public_ip_on_launch = true
+  enable_nat_gateway     = false
+  single_nat_gateway     = false
+  one_nat_gateway_per_az = false
+  tags = {
+    Project     = "dms-migration"
+  }
 }
 
 # RDS Security Group
@@ -108,74 +117,6 @@ module "destination_rds_sg" {
       cidr_blocks = ["0.0.0.0/0"]
     }
   ]
-}
-
-# Public Subnets
-module "destination_public_subnets" {
-  source = "./modules/aws/vpc/subnets"
-  name   = "destination public subnet"
-  subnets = [
-    {
-      subnet = "10.0.1.0/24"
-      az     = "us-east-1a"
-    },
-    {
-      subnet = "10.0.2.0/24"
-      az     = "us-east-1b"
-    },
-    {
-      subnet = "10.0.3.0/24"
-      az     = "us-east-1c"
-    }
-  ]
-  vpc_id                  = module.destination_vpc.vpc_id
-  map_public_ip_on_launch = true
-}
-
-# Private Subnets
-module "destination_private_subnets" {
-  source = "./modules/aws/vpc/subnets"
-  name   = "destination private subnet"
-  subnets = [
-    {
-      subnet = "10.0.4.0/24"
-      az     = "us-east-1a"
-    },
-    {
-      subnet = "10.0.5.0/24"
-      az     = "us-east-1b"
-    },
-    {
-      subnet = "10.0.6.0/24"
-      az     = "us-east-1c"
-    }
-  ]
-  vpc_id                  = module.destination_vpc.vpc_id
-  map_public_ip_on_launch = false
-}
-
-# Destination Public Route Table
-module "destination_public_rt" {
-  source  = "./modules/aws/vpc/route_tables"
-  name    = "destination public route table"
-  subnets = module.destination_public_subnets.subnets[*]
-  routes = [
-    {
-      cidr_block     = "0.0.0.0/0"
-      gateway_id     = module.destination_vpc.igw_id
-      nat_gateway_id = ""
-    }
-  ]
-  vpc_id = module.destination_vpc.vpc_id
-}
-
-# Destination Private Route Table
-module "destination_private_rt" {
-  source  = "./modules/aws/vpc/route_tables"
-  name    = "destination private route table"
-  subnets = module.destination_private_subnets.subnets[*]
-  routes  = []
-  vpc_id  = module.destination_vpc.vpc_id
 }
 
 # Secrets Manager
@@ -206,8 +147,8 @@ module "destination_db" {
   backup_retention_period = 7
   backup_window           = "03:00-05:00"
   subnet_group_ids = [
-    module.destination_private_subnets.subnets[0].id,
-    module.destination_private_subnets.subnets[1].id
+    module.destination_vpc.private_subnets[0],
+    module.destination_vpc.private_subnets[1]
   ]
   vpc_security_group_ids = [module.destination_rds_sg.id]
   publicly_accessible    = false
