@@ -15,7 +15,7 @@ variable "source_db" {
 
 variable "destination_db" {
   type    = string
-  default = "destination-db"
+  default = "destinationdb"
 }
 
 variable "destination_public_subnets" {
