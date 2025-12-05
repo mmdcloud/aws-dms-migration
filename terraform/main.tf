@@ -292,7 +292,7 @@ module "dms_replication_instance" {
 
 resource "aws_dms_event_subscription" "subscription" {
   enabled          = true
-  event_categories = ["creation", "deletion", "failure", "state-change"]
+  event_categories = ["creation", "deletion", "failure"]
   name             = "dms-event-subscription"
   sns_topic_arn    = module.sns.topic_arn
   source_ids       = [module.dms_replication_instance.replication_instance_id]
