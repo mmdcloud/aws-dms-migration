@@ -1,25 +1,25 @@
-resource "google_compute_global_address" "carshub_sql_private_ip_address" {
-  name          = "cloud-sql-private-ip-address"
-  purpose       = "VPC_PEERING"
-  address_type  = "INTERNAL"
-  prefix_length = 16
-  network       = var.vpc_id
-}
+# resource "google_compute_global_address" "carshub_sql_private_ip_address" {
+#   name          = "cloud-sql-private-ip-address"
+#   purpose       = "VPC_PEERING"
+#   address_type  = "INTERNAL"
+#   prefix_length = 16
+#   network       = var.vpc_id
+# }
 
-resource "google_service_networking_connection" "private_vpc_connection" {
-  network                 = var.vpc_id
-  service                 = "servicenetworking.googleapis.com"
-  update_on_creation_fail = true
-  deletion_policy         = "ABANDON"
-  reserved_peering_ranges = [google_compute_global_address.carshub_sql_private_ip_address.name]
-}
+# resource "google_service_networking_connection" "private_vpc_connection" {
+#   network                 = var.vpc_id
+#   service                 = "servicenetworking.googleapis.com"
+#   update_on_creation_fail = true
+#   deletion_policy         = "ABANDON"
+#   reserved_peering_ranges = [google_compute_global_address.carshub_sql_private_ip_address.name]
+# }
 
 resource "google_sql_database_instance" "db_instance" {
   name             = var.name
   region           = var.location
   database_version = var.db_version
   root_password    = var.password
-  settings {    
+  settings {
     tier                        = var.tier
     availability_type           = var.availability_type
     disk_size                   = var.disk_size
@@ -27,6 +27,24 @@ resource "google_sql_database_instance" "db_instance" {
     disk_autoresize             = var.disk_autoresize
     disk_autoresize_limit       = var.disk_autoresize_limit
     deletion_protection_enabled = var.deletion_protection_enabled
+    dynamic "backup_configuration" {
+      for_each = var.backup_configuration != null ? [var.backup_configuration] : []
+      content {
+        enabled                        = backup_configuration.value["enabled"]
+        location                       = backup_configuration.value["location"]
+        binary_log_enabled             = backup_configuration.value["binary_log_enabled"]
+        start_time                     = backup_configuration.value["start_time"]
+        transaction_log_retention_days = backup_configuration.value["transaction_log_retention_days"]
+        point_in_time_recovery_enabled = backup_configuration.value["point_in_time_recovery_enabled"]
+        dynamic "backup_retention_settings" {
+          for_each = backup_configuration.value["backup_retention_settings"]
+          content {
+            retained_backups = backup_retention_settings.value["retained_backups"]
+            retention_unit   = backup_retention_settings.value["retention_unit"]
+          }
+        }
+      }
+    }
     dynamic "database_flags" {
       for_each = var.database_flags
       content {
@@ -60,7 +78,7 @@ resource "google_sql_database_instance" "db_instance" {
         value = "0.0.0.0/0"
       }
     }
-  }  
+  }
   deletion_protection = false
   depends_on          = [google_service_networking_connection.private_vpc_connection]
 }
@@ -72,8 +90,8 @@ resource "google_sql_database" "db" {
 }
 
 resource "google_sql_user" "db_user" {
-  name        = var.db_user
-  instance    = google_sql_database_instance.db_instance.name
+  name     = var.db_user
+  instance = google_sql_database_instance.db_instance.name
   password = var.password
-  host        = "%"
+  host     = "%"
 }

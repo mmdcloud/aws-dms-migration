@@ -5,22 +5,21 @@ variable "db_version" {}
 variable "tier" {}
 variable "db_user" {}
 variable "password" {}
-variable "vpc_id" {}
 variable "vpc_self_link" {}
 variable "ipv4_enabled" {}
 variable "deletion_protection_enabled" {}
 variable "availability_type" {}
 variable "disk_size" {}
 variable "disk_type" {
-  type = string
+  type    = string
   default = "PD_SSD"
 }
 variable "disk_autoresize" {
-  type = bool
+  type    = bool
   default = false
 }
 variable "disk_autoresize_limit" {
-  type = number
+  type    = number
   default = 0
 }
 variable "database_flags" {
@@ -28,14 +27,15 @@ variable "database_flags" {
     name  = string
     value = string
   }))
-  default = []  
-} 
+  default = []
+}
 variable "backup_configuration" {
   type = list(object({
     enabled                        = bool
     start_time                     = string
     location                       = string
-    binary_log_enabled = bool
+    binary_log_enabled             = bool
+    transaction_log_retention_days = number
     point_in_time_recovery_enabled = bool
     backup_retention_settings = list(object({
       retained_backups = number
