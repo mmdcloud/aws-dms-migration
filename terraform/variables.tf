@@ -30,6 +30,12 @@ variable "destination_private_subnets" {
   default     = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
 }
 
+variable "destination_database_subnets" {
+  type        = list(string)
+  description = "Private Subnet CIDR values"
+  default     = ["10.0.7.0/24", "10.0.8.0/24", "10.0.9.0/24"]
+}
+
 variable "destination_azs" {
   type        = list(string)
   description = "Availability Zones"

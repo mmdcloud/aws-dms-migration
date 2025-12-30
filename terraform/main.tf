@@ -136,6 +136,7 @@ module "destination_vpc" {
   azs                     = var.destination_azs
   public_subnets          = var.destination_public_subnets
   private_subnets         = var.destination_private_subnets
+  database_subnets        = var.destination_database_subnets
   enable_dns_hostnames    = true
   enable_dns_support      = true
   create_igw              = true
@@ -241,8 +242,9 @@ module "destination_db" {
   backup_retention_period = 7
   backup_window           = "03:00-05:00"
   subnet_group_ids = [
-    module.destination_vpc.private_subnets[0],
-    module.destination_vpc.private_subnets[1]
+    module.destination_vpc.database_subnets[0],
+    module.destination_vpc.database_subnets[1],
+    module.destination_vpc.database_subnets[2]
   ]
   vpc_security_group_ids = [module.destination_rds_sg.id]
   publicly_accessible    = false
