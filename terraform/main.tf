@@ -26,7 +26,7 @@ module "source_vpc" {
   ]
   firewall_data = [
     {
-      name          = "gcp-dms-firewall-ingress"
+      name = "gcp-dms-firewall-ingress"
       # Allow traffic from AWS VPC and DMS subnets
       source_ranges = ["10.0.0.0/16"]
       direction     = "INGRESS"
@@ -67,7 +67,8 @@ resource "google_compute_global_address" "source_sql_private_ip_address" {
   name          = "source-sql-private-ip-address"
   purpose       = "VPC_PEERING"
   address_type  = "INTERNAL"
-  prefix_length = 16
+  prefix_length = 20
+  address       = "10.1.240.0"
   network       = module.source_vpc.vpc_id
 }
 
@@ -91,7 +92,7 @@ module "source_db" {
   location                    = var.source_location
   tier                        = "db-f1-micro"
   ipv4_enabled                = false
-  availability_type           = "ZONAL"
+  availability_type           = "REGIONAL"
   disk_size                   = 10
   deletion_protection_enabled = false
   vpc_self_link               = module.source_vpc.self_link
@@ -123,6 +124,14 @@ module "source_db" {
     {
       name  = "log_bin_trust_function_creators"
       value = "on"
+    },
+    {
+      name  = "binlog_expire_logs_seconds"
+      value = "259200"
+    },
+    {
+      name  = "max_connections"
+      value = "500"
     }
   ]
   depends_on = [
@@ -172,7 +181,11 @@ module "dms_sg" {
       to_port         = 3306
       protocol        = "tcp"
       security_groups = []
-      cidr_blocks     = ["10.0.0.0/16", "10.1.0.0/16"]
+      cidr_blocks = [
+        "10.0.0.0/16",  # AWS VPC
+        "10.1.0.0/16",  # GCP VPC subnet
+        "10.1.240.0/20" # Cloud SQL peered range
+      ]
     }
   ]
   egress_rules = [
@@ -270,7 +283,7 @@ module "destination_db" {
 # ------------------------------------------------------------------------
 # SNS Configuration
 # ------------------------------------------------------------------------
-module "sns" {
+module "dms_event_notification" {
   source     = "./modules/aws/sns"
   topic_name = "dms-job-status-change-topic"
   subscriptions = [
@@ -304,6 +317,11 @@ resource "google_compute_router" "gcp_router" {
     # Explicitly advertise the Cloud SQL subnet range
     advertised_ip_ranges {
       range = "10.1.0.0/16"
+    }
+
+    advertised_ip_ranges {
+      range       = "${google_compute_global_address.source_sql_private_ip_address.address}/${google_compute_global_address.source_sql_private_ip_address.prefix_length}"
+      description = "Cloud SQL peered range"
     }
   }
 }
@@ -354,11 +372,11 @@ resource "aws_vpn_connection" "vpn_connection_1" {
   customer_gateway_id = aws_customer_gateway.gcp_cgw_1.id
   type                = "ipsec.1"
   static_routes_only  = false
-  
+
   tags = {
     Name = "vpn-connection-1"
   }
-  
+
   depends_on = [aws_vpn_gateway_attachment.vpn_attachment]
 }
 
@@ -367,11 +385,11 @@ resource "aws_vpn_connection" "vpn_connection_2" {
   customer_gateway_id = aws_customer_gateway.gcp_cgw_2.id
   type                = "ipsec.1"
   static_routes_only  = false
-  
+
   tags = {
     Name = "vpn-connection-2"
   }
-  
+
   depends_on = [aws_vpn_gateway_attachment.vpn_attachment]
 }
 
@@ -380,7 +398,7 @@ resource "google_compute_external_vpn_gateway" "aws_vpn_gateway_1" {
   name            = "aws-vpn-gateway"
   redundancy_type = "FOUR_IPS_REDUNDANCY"
   description     = "AWS VPN Gateway"
-  
+
   interface {
     id         = 0
     ip_address = aws_vpn_connection.vpn_connection_1.tunnel1_address
@@ -450,10 +468,11 @@ resource "google_compute_vpn_tunnel" "gcp_tunnel4" {
 
 # Create router interfaces for BGP
 resource "google_compute_router_interface" "gcp_interface1" {
-  name       = "gcp-interface1"
-  router     = google_compute_router.gcp_router.name
-  region     = var.source_location
-  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel1_cgw_inside_address}/30"
+  name   = "gcp-interface1"
+  router = google_compute_router.gcp_router.name
+  region = var.source_location
+  # FIXED: GCP side uses VGW inside address (AWS's side)
+  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel1_vgw_inside_address}/30"
   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel1.name
 }
 
@@ -461,7 +480,7 @@ resource "google_compute_router_interface" "gcp_interface2" {
   name       = "gcp-interface2"
   router     = google_compute_router.gcp_router.name
   region     = var.source_location
-  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel2_cgw_inside_address}/30"
+  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel2_vgw_inside_address}/30"
   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel2.name
 }
 
@@ -469,7 +488,7 @@ resource "google_compute_router_interface" "gcp_interface3" {
   name       = "gcp-interface3"
   router     = google_compute_router.gcp_router.name
   region     = var.source_location
-  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel1_cgw_inside_address}/30"
+  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel1_vgw_inside_address}/30"
   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel3.name
 }
 
@@ -477,16 +496,17 @@ resource "google_compute_router_interface" "gcp_interface4" {
   name       = "gcp-interface4"
   router     = google_compute_router.gcp_router.name
   region     = var.source_location
-  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel2_cgw_inside_address}/30"
+  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel2_vgw_inside_address}/30"
   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel4.name
 }
 
 # Create BGP sessions
 resource "google_compute_router_peer" "gcp_bgp_peer1" {
-  name                      = "gcp-bgp-peer1"
-  router                    = google_compute_router.gcp_router.name
-  region                    = var.source_location
-  peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel1_vgw_inside_address
+  name   = "gcp-bgp-peer1"
+  router = google_compute_router.gcp_router.name
+  region = var.source_location
+  # FIXED: Peer IP is the CGW inside address (GCP's own IP on AWS side)
+  peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel1_cgw_inside_address
   peer_asn                  = 65001
   advertised_route_priority = 100
   interface                 = google_compute_router_interface.gcp_interface1.name
@@ -496,7 +516,7 @@ resource "google_compute_router_peer" "gcp_bgp_peer2" {
   name                      = "gcp-bgp-peer2"
   router                    = google_compute_router.gcp_router.name
   region                    = var.source_location
-  peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel2_vgw_inside_address
+  peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel2_cgw_inside_address
   peer_asn                  = 65001
   advertised_route_priority = 100
   interface                 = google_compute_router_interface.gcp_interface2.name
@@ -506,7 +526,7 @@ resource "google_compute_router_peer" "gcp_bgp_peer3" {
   name                      = "gcp-bgp-peer3"
   router                    = google_compute_router.gcp_router.name
   region                    = var.source_location
-  peer_ip_address           = aws_vpn_connection.vpn_connection_2.tunnel1_vgw_inside_address
+  peer_ip_address           = aws_vpn_connection.vpn_connection_2.tunnel1_cgw_inside_address
   peer_asn                  = 65001
   advertised_route_priority = 100
   interface                 = google_compute_router_interface.gcp_interface3.name
@@ -516,7 +536,7 @@ resource "google_compute_router_peer" "gcp_bgp_peer4" {
   name                      = "gcp-bgp-peer4"
   router                    = google_compute_router.gcp_router.name
   region                    = var.source_location
-  peer_ip_address           = aws_vpn_connection.vpn_connection_2.tunnel2_vgw_inside_address
+  peer_ip_address           = aws_vpn_connection.vpn_connection_2.tunnel2_cgw_inside_address
   peer_asn                  = 65001
   advertised_route_priority = 100
   interface                 = google_compute_router_interface.gcp_interface4.name
@@ -527,7 +547,7 @@ resource "aws_vpn_gateway_route_propagation" "private_routes" {
   count          = length(module.destination_vpc.private_route_table_ids)
   vpn_gateway_id = aws_vpn_gateway.aws_vpn_gw.id
   route_table_id = module.destination_vpc.private_route_table_ids[count.index]
-  
+
   depends_on = [
     aws_vpn_gateway_attachment.vpn_attachment,
     aws_vpn_connection.vpn_connection_1,
@@ -541,7 +561,7 @@ resource "aws_route" "to_gcp_cloudsql" {
   route_table_id         = module.destination_vpc.private_route_table_ids[count.index]
   destination_cidr_block = "10.1.0.0/16"
   gateway_id             = aws_vpn_gateway.aws_vpn_gw.id
-  
+
   depends_on = [
     aws_vpn_gateway_attachment.vpn_attachment,
     google_compute_vpn_tunnel.gcp_tunnel1,
@@ -561,7 +581,7 @@ resource "time_sleep" "wait_for_vpn" {
     google_compute_router_peer.gcp_bgp_peer3,
     google_compute_router_peer.gcp_bgp_peer4
   ]
-  
+
   create_duration = "300s"
 }
 
@@ -618,7 +638,7 @@ module "dms_replication_instance" {
     module.destination_vpc.private_subnets[1],
     module.destination_vpc.private_subnets[2]
   ]
-  
+
   source_endpoint_id   = "cloudsql-source"
   source_endpoint_type = "source"
   source_engine_name   = "mysql"
@@ -681,12 +701,25 @@ module "dms_replication_instance" {
           {
             "rule-type" : "selection",
             "rule-id" : "1",
-            "rule-name" : "include-source-db",
+            "rule-name" : "include-all-tables",
             "object-locator" : {
               "schema-name" : var.source_db,
               "table-name" : "%"
             },
             "rule-action" : "include"
+          },
+          {
+            "rule-type" : "transformation",
+            "rule-id" : "2",
+            "rule-name" : "add-prefix-to-tables",
+            "rule-target" : "table",
+            "object-locator" : {
+              "schema-name" : var.source_db,
+              "table-name" : "%"
+            },
+            "rule-action" : "rename",
+            "value" : "${var.source_db}",
+            "old-value" : null
           }
         ]
       })
@@ -706,8 +739,94 @@ resource "aws_dms_event_subscription" "subscription" {
   enabled          = true
   event_categories = ["creation", "deletion", "failure", "configuration change"]
   name             = "dms-event-subscription"
-  sns_topic_arn    = module.sns.topic_arn
+  sns_topic_arn    = module.dms_event_notification.topic_arn
   source_ids       = [module.dms_replication_instance.replication_instance_id]
   source_type      = "replication-instance"
   depends_on       = [module.dms_replication_instance]
+}
+
+# -----------------------------------------------------------------------------------------
+# VPN Health Check and Validation
+# -----------------------------------------------------------------------------------------
+resource "null_resource" "validate_vpn_connectivity" {
+  depends_on = [
+    google_compute_router_peer.gcp_bgp_peer1,
+    google_compute_router_peer.gcp_bgp_peer2,
+    google_compute_router_peer.gcp_bgp_peer3,
+    google_compute_router_peer.gcp_bgp_peer4,
+    aws_vpn_gateway_route_propagation.private_routes
+  ]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "Waiting for VPN tunnels to establish..."
+      sleep 60
+      
+      # Check AWS VPN connection status
+      echo "Checking AWS VPN Connection 1 status..."
+      aws ec2 describe-vpn-connections \
+        --vpn-connection-ids ${aws_vpn_connection.vpn_connection_1.id} \
+        --query 'VpnConnections[0].VgwTelemetry[*].[OutsideIpAddress,Status]' \
+        --output table
+      
+      echo "Checking AWS VPN Connection 2 status..."
+      aws ec2 describe-vpn-connections \
+        --vpn-connection-ids ${aws_vpn_connection.vpn_connection_2.id} \
+        --query 'VpnConnections[0].VgwTelemetry[*].[OutsideIpAddress,Status]' \
+        --output table
+      
+      # Wait for BGP to converge
+      echo "Waiting 3 minutes for BGP convergence..."
+      sleep 180
+      
+      # Check BGP session status on GCP
+      echo "Checking GCP BGP session status..."
+      gcloud compute routers get-status ${google_compute_router.gcp_router.name} \
+        --region=${var.source_location} \
+        --format="table(result.bgpPeerStatus[].name,result.bgpPeerStatus[].state)"
+      
+      echo "VPN validation complete. Check logs above for any DOWN tunnels."
+    EOT
+  }
+}
+
+# -----------------------------------------------------------------------------------------
+# CloudWatch Alarms for Monitoring
+# -----------------------------------------------------------------------------------------
+module "dms_cpu" {
+  source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+  alarm_name          = "dms-high-cpu"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/DMS"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "80"
+  alarm_description   = "DMS instance CPU utilization is too high"
+  ok_actions          = [module.dms_event_notification.topic_arn]
+  alarm_actions       = [module.dms_event_notification.topic_arn]
+
+  dimensions = {
+    ReplicationInstanceIdentifier = module.dms_replication_instance.replication_instance_id
+  }
+}
+
+module "dms_freeable_memory" {
+  source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+  alarm_name          = "dms-low-memory"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "FreeableMemory"
+  namespace           = "AWS/DMS"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "524288000" # 500MB
+  alarm_description   = "DMS instance freeable memory is low"
+  ok_actions          = [module.dms_event_notification.topic_arn]
+  alarm_actions       = [module.dms_event_notification.topic_arn]
+
+  dimensions = {
+    ReplicationInstanceIdentifier = module.dms_replication_instance.replication_instance_id
+  }
 }
