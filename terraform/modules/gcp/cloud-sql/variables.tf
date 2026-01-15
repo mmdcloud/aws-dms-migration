@@ -35,7 +35,7 @@ variable "backup_configuration" {
     start_time                     = string
     location                       = string
     binary_log_enabled             = bool
-    transaction_log_retention_days = number
+    transaction_log_retention_days = optional(number)
     point_in_time_recovery_enabled = bool
     backup_retention_settings = list(object({
       retained_backups = number

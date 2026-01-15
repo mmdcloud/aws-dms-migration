@@ -29,4 +29,5 @@ resource "google_compute_firewall" "firewall" {
   }
   direction     = var.firewall_data[count.index].direction
   source_ranges = var.firewall_data[count.index].source_ranges
+  destination_ranges = var.firewall_data[count.index].destination_ranges
 }

@@ -5,7 +5,8 @@ variable "routing_mode" {}
 variable "firewall_data" {
   type = list(object({
     name          = string
-    source_ranges = set(string)
+    source_ranges = optional(set(string))
+    destination_ranges = optional(set(string))
     direction     = string
     allow_list = set(object({
       protocol = string

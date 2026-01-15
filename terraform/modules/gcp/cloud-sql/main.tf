@@ -80,7 +80,6 @@ resource "google_sql_database_instance" "db_instance" {
     }
   }
   deletion_protection = false
-  depends_on          = [google_service_networking_connection.private_vpc_connection]
 }
 
 

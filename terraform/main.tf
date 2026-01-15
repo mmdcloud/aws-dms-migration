@@ -26,8 +26,7 @@ module "source_vpc" {
   ]
   firewall_data = [
     {
-      name = "gcp-dms-firewall-ingress"
-      # Allow traffic from AWS VPC and DMS subnets
+      name          = "gcp-dms-firewall-ingress"
       source_ranges = ["10.0.0.0/16"]
       direction     = "INGRESS"
       allow_list = [
