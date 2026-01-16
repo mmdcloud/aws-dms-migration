@@ -30,16 +30,16 @@ variable "database_flags" {
   default = []
 }
 variable "backup_configuration" {
-  type = list(object({
+  type = object({
     enabled                        = bool
     start_time                     = string
     location                       = string
     binary_log_enabled             = bool
     transaction_log_retention_days = optional(number)
     point_in_time_recovery_enabled = bool
-    backup_retention_settings = list(object({
+    backup_retention_settings = object({
       retained_backups = number
       retention_unit   = string
-    }))
-  }))
+    })
+  })
 }

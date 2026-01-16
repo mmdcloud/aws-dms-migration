@@ -37,7 +37,7 @@ resource "google_sql_database_instance" "db_instance" {
         transaction_log_retention_days = backup_configuration.value["transaction_log_retention_days"]
         point_in_time_recovery_enabled = backup_configuration.value["point_in_time_recovery_enabled"]
         dynamic "backup_retention_settings" {
-          for_each = backup_configuration.value["backup_retention_settings"]
+          for_each = backup_configuration.value["backup_retention_settings"] != null ? [backup_configuration.value["backup_retention_settings"]] : []
           content {
             retained_backups = backup_retention_settings.value["retained_backups"]
             retention_unit   = backup_retention_settings.value["retention_unit"]
@@ -50,23 +50,6 @@ resource "google_sql_database_instance" "db_instance" {
       content {
         name  = database_flags.value["name"]
         value = database_flags.value["value"]
-      }
-    }
-    dynamic "backup_configuration" {
-      for_each = var.backup_configuration
-      content {
-        enabled                        = backup_configuration.value["enabled"]
-        location                       = backup_configuration.value["location"]
-        binary_log_enabled             = backup_configuration.value["binary_log_enabled"]
-        start_time                     = backup_configuration.value["start_time"]
-        point_in_time_recovery_enabled = backup_configuration.value["point_in_time_recovery_enabled"]
-        dynamic "backup_retention_settings" {
-          for_each = backup_configuration.value["backup_retention_settings"]
-          content {
-            retained_backups = backup_retention_settings.value["retained_backups"]
-            retention_unit   = backup_retention_settings.value["retention_unit"]
-          }
-        }
       }
     }
     ip_configuration {

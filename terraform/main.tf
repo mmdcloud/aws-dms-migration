@@ -27,7 +27,7 @@ module "source_vpc" {
   firewall_data = [
     {
       name          = "gcp-dms-firewall-ingress"
-      source_ranges = ["10.0.0.0/16"]
+      source_ranges = ["10.0.0.0/16", "10.2.0.0/20"]
       direction     = "INGRESS"
       allow_list = [
         {
@@ -38,7 +38,7 @@ module "source_vpc" {
     },
     {
       name               = "gcp-dms-firewall-egress"
-      destination_ranges = ["10.0.0.0/16"]
+      destination_ranges = ["10.0.0.0/16", "10.2.0.0/20"]
       direction          = "EGRESS"
       allow_list = [
         {
@@ -67,7 +67,7 @@ resource "google_compute_global_address" "source_sql_private_ip_address" {
   purpose       = "VPC_PEERING"
   address_type  = "INTERNAL"
   prefix_length = 20
-  address       = "10.1.240.0"
+  address       = "10.2.0.0"
   network       = module.source_vpc.vpc_id
 }
 
@@ -96,37 +96,21 @@ module "source_db" {
   deletion_protection_enabled = false
   vpc_self_link               = module.source_vpc.self_link
   password                    = module.source_cloudsql_password_secret.secret_data
-  backup_configuration = [
-    {
-      enabled                        = true
-      location                       = "us-central1"
-      binary_log_enabled             = true
-      start_time                     = "03:00"
-      point_in_time_recovery_enabled = true
-      backup_retention_settings = [
-        {
-          retained_backups = 7
-          retention_unit   = "DAYS"
-        }
-      ]
+  backup_configuration = {
+    enabled                        = true
+    location                       = "us-central1"
+    binary_log_enabled             = true
+    start_time                     = "03:00"
+    point_in_time_recovery_enabled = false
+    backup_retention_settings = {
+      retained_backups = 7
+      retention_unit   = "COUNT"
     }
-  ]
+  }
   database_flags = [
     {
-      name  = "binlog_format"
-      value = "ROW"
-    },
-    {
       name  = "binlog_row_image"
-      value = "FULL"
-    },
-    {
-      name  = "log_bin_trust_function_creators"
-      value = "on"
-    },
-    {
-      name  = "binlog_expire_logs_seconds"
-      value = "259200"
+      value = "full"
     },
     {
       name  = "max_connections"
@@ -626,7 +610,7 @@ module "dms_replication_instance" {
   allocated_storage                    = 20
   apply_immediately                    = false
   publicly_accessible                  = false
-  replication_instance_class           = "dms.t3.micro"
+  replication_instance_class           = "dms.t3.medium"
   engine_version                       = "3.6.1"
   replication_instance_id              = "dms-instance"
   vpc_security_group_ids               = [module.dms_sg.id]
