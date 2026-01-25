@@ -1,4 +1,4 @@
-# Cross-Cloud Database Migration: GCP Cloud SQL to AWS RDS
+# 🚀 Cross-Cloud Database Migration: GCP Cloud SQL to AWS RDS
 
 [![Terraform](https://img.shields.io/badge/Terraform-1.0+-623CE4?style=for-the-badge&logo=terraform)](https://www.terraform.io/)
 [![AWS](https://img.shields.io/badge/AWS-DMS-FF9900?style=for-the-badge&logo=amazon-aws)](https://aws.amazon.com/dms/)
