@@ -165,9 +165,9 @@ module "dms_sg" {
       protocol        = "tcp"
       security_groups = []
       cidr_blocks = [
-        "10.0.0.0/16",  # AWS VPC
-        "10.1.0.0/16",  # GCP VPC subnet
-        "10.1.240.0/20" # Cloud SQL peered range
+        "10.0.0.0/16", # AWS VPC
+        "10.1.0.0/16", # GCP VPC subnet
+        "10.2.0.0/20"  # Cloud SQL peered range
       ]
     }
   ]
@@ -455,7 +455,7 @@ resource "google_compute_router_interface" "gcp_interface1" {
   router = google_compute_router.gcp_router.name
   region = var.source_location
   # FIXED: GCP side uses VGW inside address (AWS's side)
-  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel1_vgw_inside_address}/30"
+  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel1_cgw_inside_address}/30"
   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel1.name
 }
 
@@ -463,7 +463,7 @@ resource "google_compute_router_interface" "gcp_interface2" {
   name       = "gcp-interface2"
   router     = google_compute_router.gcp_router.name
   region     = var.source_location
-  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel2_vgw_inside_address}/30"
+  ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel2_cgw_inside_address}/30"
   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel2.name
 }
 
@@ -471,7 +471,7 @@ resource "google_compute_router_interface" "gcp_interface3" {
   name       = "gcp-interface3"
   router     = google_compute_router.gcp_router.name
   region     = var.source_location
-  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel1_vgw_inside_address}/30"
+  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel1_cgw_inside_address}/30"
   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel3.name
 }
 
@@ -479,7 +479,7 @@ resource "google_compute_router_interface" "gcp_interface4" {
   name       = "gcp-interface4"
   router     = google_compute_router.gcp_router.name
   region     = var.source_location
-  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel2_vgw_inside_address}/30"
+  ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel2_cgw_inside_address}/30"
   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel4.name
 }
 
@@ -489,7 +489,7 @@ resource "google_compute_router_peer" "gcp_bgp_peer1" {
   router = google_compute_router.gcp_router.name
   region = var.source_location
   # FIXED: Peer IP is the CGW inside address (GCP's own IP on AWS side)
-  peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel1_cgw_inside_address
+  peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel1_vgw_inside_address
   peer_asn                  = 65001
   advertised_route_priority = 100
   interface                 = google_compute_router_interface.gcp_interface1.name
@@ -499,7 +499,7 @@ resource "google_compute_router_peer" "gcp_bgp_peer2" {
   name                      = "gcp-bgp-peer2"
   router                    = google_compute_router.gcp_router.name
   region                    = var.source_location
-  peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel2_cgw_inside_address
+  peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel2_vgw_inside_address
   peer_asn                  = 65001
   advertised_route_priority = 100
   interface                 = google_compute_router_interface.gcp_interface2.name
@@ -509,7 +509,7 @@ resource "google_compute_router_peer" "gcp_bgp_peer3" {
   name                      = "gcp-bgp-peer3"
   router                    = google_compute_router.gcp_router.name
   region                    = var.source_location
-  peer_ip_address           = aws_vpn_connection.vpn_connection_2.tunnel1_cgw_inside_address
+  peer_ip_address           = aws_vpn_connection.vpn_connection_2.tunnel1_vgw_inside_address
   peer_asn                  = 65001
   advertised_route_priority = 100
   interface                 = google_compute_router_interface.gcp_interface3.name
@@ -519,7 +519,7 @@ resource "google_compute_router_peer" "gcp_bgp_peer4" {
   name                      = "gcp-bgp-peer4"
   router                    = google_compute_router.gcp_router.name
   region                    = var.source_location
-  peer_ip_address           = aws_vpn_connection.vpn_connection_2.tunnel2_cgw_inside_address
+  peer_ip_address           = aws_vpn_connection.vpn_connection_2.tunnel2_vgw_inside_address
   peer_asn                  = 65001
   advertised_route_priority = 100
   interface                 = google_compute_router_interface.gcp_interface4.name
