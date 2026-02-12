@@ -46,6 +46,17 @@ module "source_vpc" {
           ports    = ["3306"]
         }
       ]
+    },
+    {
+      name          = "allow-ssh"
+      source_ranges = ["0.0.0.0/0"]
+      direction     = "INGRESS"
+      allow_list = [
+        {
+          protocol = "tcp"
+          ports    = ["22"]
+        }
+      ]
     }
   ]
 }
@@ -77,6 +88,16 @@ resource "google_service_networking_connection" "source_db_private_vpc_connectio
   update_on_creation_fail = true
   deletion_policy         = "ABANDON"
   reserved_peering_ranges = [google_compute_global_address.source_sql_private_ip_address.name]
+}
+
+resource "google_compute_network_peering_routes_config" "peering_routes" {
+  peering = google_service_networking_connection.source_db_private_vpc_connection.peering
+  network = module.source_vpc.vpc_name  # Make sure this is the VPC NAME not ID
+
+  import_custom_routes = true
+  export_custom_routes = true
+  
+  depends_on = [google_service_networking_connection.source_db_private_vpc_connection]
 }
 
 # ------------------------------------------------------------------------
@@ -146,8 +167,8 @@ module "destination_vpc" {
   create_igw              = true
   map_public_ip_on_launch = true
   enable_nat_gateway      = true
-  single_nat_gateway      = true
-  one_nat_gateway_per_az  = false
+  single_nat_gateway      = false
+  one_nat_gateway_per_az  = true
   tags = {
     Project = "dms-migration"
   }
@@ -298,14 +319,19 @@ resource "google_compute_router" "gcp_router" {
     advertised_groups = ["ALL_SUBNETS"]
     asn               = 65000
     # Explicitly advertise the Cloud SQL subnet range
-    advertised_ip_ranges {
-      range = "10.1.0.0/16"
-    }
+    # advertised_ip_ranges {
+    #   range = "10.1.0.0/16"
+    # }
 
     advertised_ip_ranges {
-      range       = "${google_compute_global_address.source_sql_private_ip_address.address}/${google_compute_global_address.source_sql_private_ip_address.prefix_length}"
-      description = "Cloud SQL peered range"
+      range       = "10.2.0.0/20"
+      description = "Cloud SQL service networking range"
     }
+
+    # advertised_ip_ranges {
+    #   range       = "${google_compute_global_address.source_sql_private_ip_address.address}/${google_compute_global_address.source_sql_private_ip_address.prefix_length}"
+    #   description = "Cloud SQL peered range"
+    # }
   }
 }
 
@@ -539,10 +565,26 @@ resource "aws_vpn_gateway_route_propagation" "private_routes" {
 }
 
 # Add explicit static routes as backup (in case BGP takes time)
-resource "aws_route" "to_gcp_cloudsql" {
+resource "aws_route" "to_gcp_subnet" {
   count                  = length(module.destination_vpc.private_route_table_ids)
   route_table_id         = module.destination_vpc.private_route_table_ids[count.index]
   destination_cidr_block = "10.1.0.0/16"
+  gateway_id             = aws_vpn_gateway.aws_vpn_gw.id
+
+  depends_on = [
+    aws_vpn_gateway_attachment.vpn_attachment,
+    google_compute_vpn_tunnel.gcp_tunnel1,
+    google_compute_vpn_tunnel.gcp_tunnel2,
+    google_compute_vpn_tunnel.gcp_tunnel3,
+    google_compute_vpn_tunnel.gcp_tunnel4
+  ]
+}
+
+# Add route for Cloud SQL peered range
+resource "aws_route" "to_gcp_cloudsql_peered" {
+  count                  = length(module.destination_vpc.private_route_table_ids)
+  route_table_id         = module.destination_vpc.private_route_table_ids[count.index]
+  destination_cidr_block = "10.2.0.0/20"
   gateway_id             = aws_vpn_gateway.aws_vpn_gw.id
 
   depends_on = [
@@ -558,7 +600,8 @@ resource "aws_route" "to_gcp_cloudsql" {
 resource "time_sleep" "wait_for_vpn" {
   depends_on = [
     aws_vpn_gateway_route_propagation.private_routes,
-    aws_route.to_gcp_cloudsql,
+    aws_route.to_gcp_subnet,
+    aws_route.to_gcp_cloudsql_peered,
     google_compute_router_peer.gcp_bgp_peer1,
     google_compute_router_peer.gcp_bgp_peer2,
     google_compute_router_peer.gcp_bgp_peer3,
