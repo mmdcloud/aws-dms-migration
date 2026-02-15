@@ -26,9 +26,15 @@ module "source_vpc" {
   ]
   firewall_data = [
     {
-      name          = "gcp-dms-firewall-ingress"
-      source_ranges = ["10.0.0.0/16", "10.2.0.0/20"]
-      direction     = "INGRESS"
+      name = "gcp-dms-firewall-ingress"
+      source_ranges = [
+        "10.0.0.0/16", # AWS VPC (entire range)
+        "10.2.0.0/20", # Cloud SQL peered range
+        "10.0.1.0/24", # Add specific private subnet ranges
+        "10.0.2.0/24",
+        "10.0.3.0/24"
+      ]
+      direction = "INGRESS"
       allow_list = [
         {
           protocol = "tcp"
@@ -92,11 +98,11 @@ resource "google_service_networking_connection" "source_db_private_vpc_connectio
 
 resource "google_compute_network_peering_routes_config" "peering_routes" {
   peering = google_service_networking_connection.source_db_private_vpc_connection.peering
-  network = module.source_vpc.vpc_name  # Make sure this is the VPC NAME not ID
+  network = module.source_vpc.vpc_name # Make sure this is the VPC NAME not ID
 
   import_custom_routes = true
   export_custom_routes = true
-  
+
   depends_on = [google_service_networking_connection.source_db_private_vpc_connection]
 }
 
