@@ -53,17 +53,17 @@ module "source_vpc" {
         }
       ]
     },
-    {
-      name          = "allow-ssh"
-      source_ranges = ["0.0.0.0/0"]
-      direction     = "INGRESS"
-      allow_list = [
-        {
-          protocol = "tcp"
-          ports    = ["22"]
-        }
-      ]
-    }
+    # {
+    #   name          = "allow-ssh"
+    #   source_ranges = ["0.0.0.0/0"]
+    #   direction     = "INGRESS"
+    #   allow_list = [
+    #     {
+    #       protocol = "tcp"
+    #       ports    = ["22"]
+    #     }
+    #   ]
+    # }
   ]
 }
 
@@ -113,14 +113,14 @@ module "source_db" {
   source                      = "./modules/gcp/cloud-sql"
   name                        = var.source_db
   db_name                     = var.source_db
-  db_user                     = "mohit"
+  db_user                     = tostring(data.vault_generic_secret.cloudsql.data["username"])
   db_version                  = "MYSQL_8_0"
   location                    = var.source_location
-  tier                        = "db-f1-micro"
+  tier                        = "db-f1-micro" # Use db-n1-standard-2 for production readiness
   ipv4_enabled                = false
   availability_type           = "REGIONAL"
   disk_size                   = 10
-  deletion_protection_enabled = false
+  deletion_protection_enabled = false # Make it true for production readiness
   vpc_self_link               = module.source_vpc.self_link
   password                    = module.source_cloudsql_password_secret.secret_data
   backup_configuration = {
@@ -128,7 +128,7 @@ module "source_db" {
     location                       = "us-central1"
     binary_log_enabled             = true
     start_time                     = "03:00"
-    point_in_time_recovery_enabled = false
+    point_in_time_recovery_enabled = false # Make it true for production readiness
     backup_retention_settings = {
       retained_backups = 7
       retention_unit   = "COUNT"
@@ -256,7 +256,7 @@ module "destination_db_credentials" {
   source                  = "./modules/aws/secrets-manager"
   name                    = "destination_rds_secrets"
   description             = "destination_rds_secrets"
-  recovery_window_in_days = 0
+  recovery_window_in_days = 35
   secret_string = jsonencode({
     username = tostring(data.vault_generic_secret.rds.data["username"])
     password = tostring(data.vault_generic_secret.rds.data["password"])
@@ -272,7 +272,7 @@ module "destination_db" {
   allocated_storage       = 20
   engine                  = "mysql"
   engine_version          = "8.0"
-  instance_class          = "db.t3.micro"
+  instance_class          = "db.t3.micro" # Use db.r6g.large for production readiness
   multi_az                = true
   parameter_group_name    = "default.mysql8.0"
   username                = tostring(data.vault_generic_secret.rds.data["username"])
@@ -287,7 +287,7 @@ module "destination_db" {
   ]
   vpc_security_group_ids = [module.destination_rds_sg.id]
   publicly_accessible    = false
-  skip_final_snapshot    = true
+  skip_final_snapshot    = true # Make it false for production readiness
 }
 
 # ------------------------------------------------------------------------
@@ -299,7 +299,7 @@ module "dms_event_notification" {
   subscriptions = [
     {
       protocol = "email"
-      endpoint = "madmaxcloudonline@gmail.com"
+      endpoint = var.notification_email
     }
   ]
 }
@@ -659,8 +659,8 @@ module "dms_replication_instance" {
   allocated_storage                    = 20
   apply_immediately                    = false
   publicly_accessible                  = false
-  replication_instance_class           = "dms.t3.medium"
-  engine_version                       = "3.6.1"
+  replication_instance_class           = "dms.t3.medium" # Use dms.c5.xlarge for production readiness
+  engine_version                       = var.dms_engine_version
   replication_instance_id              = "dms-instance"
   vpc_security_group_ids               = [module.dms_sg.id]
   replication_subnet_group_id          = "dms-subnet-group"
@@ -678,7 +678,7 @@ module "dms_replication_instance" {
   source_password      = tostring(data.vault_generic_secret.cloudsql.data["password"])
   source_server_name   = module.source_db.private_ip_address
   source_port          = 3306
-  source_ssl_mode      = "none"
+  source_ssl_mode      = "none" # require
 
   destination_endpoint_id   = "rds"
   destination_endpoint_type = "target"
@@ -687,7 +687,7 @@ module "dms_replication_instance" {
   destination_password      = tostring(data.vault_generic_secret.rds.data["password"])
   destination_server_name   = split(":", module.destination_db.endpoint)[0]
   destination_port          = 3306
-  destination_ssl_mode      = "none"
+  destination_ssl_mode      = "none" # require
 
   tasks = [
     {
@@ -703,7 +703,7 @@ module "dms_replication_instance" {
           LobMaxSize         = 32
         }
         FullLoadSettings = {
-          TargetTablePrepMode = "DROP_AND_CREATE"
+          TargetTablePrepMode = "TRUNCATE"
           MaxFullLoadSubTasks = 8
         }
         Logging = {

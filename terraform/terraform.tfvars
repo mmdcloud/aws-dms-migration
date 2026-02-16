@@ -6,3 +6,5 @@ destination_public_subnets   = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
 destination_private_subnets  = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
 destination_database_subnets = ["10.0.7.0/24", "10.0.8.0/24", "10.0.9.0/24"]
 destination_azs              = ["us-east-1a", "us-east-1b", "us-east-1c"]
+notification_email = "madmaxcloudonline@gmail.com"
+dms_engine_version = "3.6.1"
