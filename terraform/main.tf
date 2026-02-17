@@ -1,3 +1,7 @@
+resource "random_id" "id" {
+  byte_length = 8
+}
+
 # ------------------------------------------------------------------------
 # GCP Secret(Vault) Configuration
 # ------------------------------------------------------------------------
@@ -254,9 +258,9 @@ module "destination_rds_sg" {
 # ------------------------------------------------------------------------
 module "destination_db_credentials" {
   source                  = "./modules/aws/secrets-manager"
-  name                    = "destination_rds_secrets"
+  name                    = "destination-rds-secrets-${random_id.id.hex}"
   description             = "destination_rds_secrets"
-  recovery_window_in_days = 35
+  recovery_window_in_days = 30
   secret_string = jsonencode({
     username = tostring(data.vault_generic_secret.rds.data["username"])
     password = tostring(data.vault_generic_secret.rds.data["password"])
@@ -299,7 +303,7 @@ module "dms_event_notification" {
   subscriptions = [
     {
       protocol = "email"
-      endpoint = var.notification_email
+      endpoint = "${var.notification_email}"
     }
   ]
 }
@@ -701,9 +705,10 @@ module "dms_replication_instance" {
           LobChunkSize       = 64
           LimitedSizeLobMode = true
           LobMaxSize         = 32
+          FailOnNoTablesCaptured = false 
         }
         FullLoadSettings = {
-          TargetTablePrepMode = "TRUNCATE"
+          TargetTablePrepMode = "DROP_AND_CREATE"
           MaxFullLoadSubTasks = 8
         }
         Logging = {

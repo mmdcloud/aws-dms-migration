@@ -12,6 +12,10 @@ terraform {
       source  = "hashicorp/vault"
       version = "~> 4.0"
     }
+    random = {
+      source = "hashicorp/random"
+      version = "3.8.1"
+    }
   }
   # backend "s3" {
   #   bucket         = "dms-migration-project-bucket"

@@ -39,11 +39,11 @@ variable "destination_azs" {
 }
 
 variable "notification_email" {
-  type        = list(string)
+  type        = string
   description = "Notification Email"
 }
 
 variable "dms_engine_version" {
-  type        = list(string)
+  type        = string
   description = "DMS Engine Version"
 }
