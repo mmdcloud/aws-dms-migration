@@ -1,3 +1,10 @@
+locals {
+  common_tags = {
+    Project     = "dms-migration"
+    ManagedBy   = "terraform"
+  }
+}
+
 resource "random_id" "id" {
   byte_length = 8
 }
@@ -708,7 +715,7 @@ module "dms_replication_instance" {
           FailOnNoTablesCaptured = false 
         }
         FullLoadSettings = {
-          TargetTablePrepMode = "DROP_AND_CREATE"
+          TargetTablePrepMode = "DO_NOTHING"
           MaxFullLoadSubTasks = 8
         }
         Logging = {
