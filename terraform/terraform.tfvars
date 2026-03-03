@@ -1,6 +1,6 @@
 source_location              = "us-central1"
 destination_location         = "us-east-1"
-source_db                    = "sample"
+source_db                    = "madmax"
 destination_db               = "destinationdb"
 destination_public_subnets   = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
 destination_private_subnets  = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]

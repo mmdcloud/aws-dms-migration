@@ -1,7 +1,7 @@
 locals {
   common_tags = {
-    Project     = "dms-migration"
-    ManagedBy   = "terraform"
+    Project   = "dms-migration"
+    ManagedBy = "terraform"
   }
 }
 
@@ -706,13 +706,13 @@ module "dms_replication_instance" {
       replication_task_id = "cloudsql-to-rds-task"
       replication_task_settings = jsonencode({
         TargetMetadata = {
-          TargetSchema       = ""
-          SupportLobs        = true
-          FullLobMode        = false
-          LobChunkSize       = 64
-          LimitedSizeLobMode = true
-          LobMaxSize         = 32
-          FailOnNoTablesCaptured = false 
+          TargetSchema           = ""
+          SupportLobs            = true
+          FullLobMode            = false
+          LobChunkSize           = 64
+          LimitedSizeLobMode     = true
+          LobMaxSize             = 32
+          FailOnNoTablesCaptured = false
         }
         FullLoadSettings = {
           TargetTablePrepMode = "DO_NOTHING"
