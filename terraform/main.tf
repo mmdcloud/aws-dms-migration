@@ -758,12 +758,11 @@ module "dms_replication_instance" {
             "rule-name" : "add-prefix-to-tables",
             "rule-target" : "table",
             "object-locator" : {
-              "schema-name" : var.source_db,
+              "schema-name" : "madmax",
               "table-name" : "%"
             },
-            "rule-action" : "rename",
-            "value" : "${var.source_db}",
-            "old-value" : null
+            "rule-action" : "add-prefix",
+            "value" : "madmax_"
           }
         ]
       })
