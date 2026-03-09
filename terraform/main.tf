@@ -1060,7 +1060,7 @@ module "source_test_instance" {
   name                      = "source-test-instance"
   machine_type              = "e2-micro"
   zone                      = "asia-south1-a"
-  metadata_startup_script   = "sudo apt-get update; sudo apt-get install default-mysql-client -y"
+  metadata_startup_script   = file("${path.module}/scripts/user_data.sh")
   deletion_protection       = false
   allow_stopping_for_update = true
   image                     = "ubuntu-os-cloud/ubuntu-2004-focal-v20220712"
