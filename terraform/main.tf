@@ -39,9 +39,9 @@ module "source_vpc" {
     {
       name = "gcp-dms-firewall-ingress"
       source_ranges = [
-        "10.0.0.0/16", 
-        "10.2.0.0/20", 
-        "10.0.1.0/24", 
+        "10.0.0.0/16",
+        "10.2.0.0/20",
+        "10.0.1.0/24",
         "10.0.2.0/24",
         "10.0.3.0/24"
       ]
@@ -192,9 +192,9 @@ module "dms_sg" {
       protocol        = "tcp"
       security_groups = []
       cidr_blocks = [
-        "10.0.0.0/16", 
-        "10.1.0.0/16",  
-        "10.2.0.0/20"   
+        "10.0.0.0/16",
+        "10.1.0.0/16",
+        "10.2.0.0/20"
       ]
     }
   ]
@@ -508,9 +508,9 @@ resource "google_compute_router_interface" "gcp_interface4" {
 
 # Create BGP sessions
 resource "google_compute_router_peer" "gcp_bgp_peer1" {
-  name   = "gcp-bgp-peer1"
-  router = google_compute_router.gcp_router.name
-  region = var.source_location
+  name                      = "gcp-bgp-peer1"
+  router                    = google_compute_router.gcp_router.name
+  region                    = var.source_location
   peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel1_vgw_inside_address
   peer_asn                  = 65001
   advertised_route_priority = 100
@@ -1017,4 +1017,35 @@ module "rds_write_latency" {
   dimensions = {
     DBInstanceIdentifier = module.destination_db.id
   }
+}
+
+# -----------------------------------------------------------------------------------------
+# Test Instances
+# -----------------------------------------------------------------------------------------
+# GCP Instance
+resource "google_compute_address" "gcp_vm_ip" {
+  name = "gcp-vm-public-ip"
+}
+
+module "gcp_instance" {
+  source                    = "./modules/gcp/compute"
+  name                      = "gcp-instance"
+  machine_type              = "e2-micro"
+  zone                      = "asia-south1-a"
+  metadata_startup_script   = "sudo apt-get update; sudo apt-get install default-mysql-client -y"
+  deletion_protection       = false
+  allow_stopping_for_update = true
+  image                     = "ubuntu-os-cloud/ubuntu-2004-focal-v20220712"
+  network_interfaces = [
+    {
+      network    = module.source_vpc.vpc_id
+      subnetwork = module.source_vpc.subnets[0].id
+      access_configs = [
+        {
+          nat_ip = google_compute_address.gcp_vm_ip.address
+        }
+      ]
+    }
+  ]
+  tags = ["gcp-instance"]
 }
