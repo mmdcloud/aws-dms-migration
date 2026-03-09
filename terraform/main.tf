@@ -249,6 +249,34 @@ module "destination_rds_sg" {
   }
 }
 
+module "destination_test_instance_sg" {
+  source = "./modules/aws/security-groups"
+  name   = "destination-test-instance-sg"
+  vpc_id = module.destination_vpc.vpc_id
+  ingress_rules = [
+    {
+      description     = "Allow SSH From anywhere"
+      from_port       = 22
+      to_port         = 22
+      protocol        = "tcp"
+      security_groups = []
+      cidr_blocks     = ["0.0.0.0/0"]
+    }
+  ]
+  egress_rules = [
+    {
+      description = "Allow all outbound traffic"
+      from_port   = 0
+      to_port     = 0
+      protocol    = "-1"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  ]
+  tags = {
+    Name = "destination-rds-sg"
+  }
+}
+
 # ------------------------------------------------------------------------
 # AWS Secret Manager Configuration
 # ------------------------------------------------------------------------
@@ -1027,9 +1055,9 @@ resource "google_compute_address" "gcp_vm_ip" {
   name = "gcp-vm-public-ip"
 }
 
-module "gcp_instance" {
+module "source_test_instance" {
   source                    = "./modules/gcp/compute"
-  name                      = "gcp-instance"
+  name                      = "source-test-instance"
   machine_type              = "e2-micro"
   zone                      = "asia-south1-a"
   metadata_startup_script   = "sudo apt-get update; sudo apt-get install default-mysql-client -y"
@@ -1048,4 +1076,37 @@ module "gcp_instance" {
     }
   ]
   tags = ["gcp-instance"]
+}
+
+# AWS Instance
+data "aws_ami" "ubuntu" {
+  most_recent = true
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+
+  owners = ["099720109477"]
+}
+
+data "aws_key_pair" "key_pair" {
+  key_name = "madmaxkeypair"
+}
+
+module "destination_test_instance" {
+  source                      = "./modules/aws/ec2"
+  name                        = "destination-test-instance"
+  ami                         = data.aws_ami.ubuntu.id
+  instance_type               = "t2.micro"
+  associate_public_ip_address = true
+  key_name                    = data.aws_key_pair.key_pair.key_name
+  subnet_id                   = module.destination_vpc.public_subnets[0]
+  security_groups             = [module.destination_test_instance_sg.id]
+  user_data                   = filebase64("${path.module}/scripts/user_data.sh")
 }
