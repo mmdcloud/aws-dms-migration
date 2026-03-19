@@ -10,6 +10,10 @@ variable "destination_location" {
   type = string
 }
 
+variable "gcp_project" {
+  type = string
+}
+
 variable "source_db" {
   type = string
 }

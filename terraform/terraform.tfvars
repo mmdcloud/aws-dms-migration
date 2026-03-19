@@ -8,3 +8,4 @@ destination_database_subnets = ["10.0.7.0/24", "10.0.8.0/24", "10.0.9.0/24"]
 destination_azs              = ["us-east-1a", "us-east-1b", "us-east-1c"]
 notification_email           = "madmaxcloudonline@gmail.com"
 dms_engine_version           = "3.6.1"
+gcp_project                  = "encoded-alpha-457108-e8"

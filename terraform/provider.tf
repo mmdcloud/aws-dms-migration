@@ -28,12 +28,12 @@ terraform {
 
 # Configure the AWS Provider
 provider "aws" {
-  region = "us-east-1"
+  region = var.destination_location
 }
 
 provider "google" {
-  region  = "us-central1"
-  project = "encoded-alpha-457108-e8"
+  region  = var.source_location
+  project = var.gcp_project
 }
 
 provider "vault" {}

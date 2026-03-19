@@ -1059,7 +1059,7 @@ module "source_test_instance" {
   source                    = "./modules/gcp/compute"
   name                      = "source-test-instance"
   machine_type              = "e2-micro"
-  zone                      = "asia-south1-a"
+  zone                      = "${var.source_location}-a"
   metadata_startup_script   = file("${path.module}/scripts/user_data.sh")
   deletion_protection       = false
   allow_stopping_for_update = true
