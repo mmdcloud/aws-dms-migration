@@ -54,6 +54,19 @@ module "source_vpc" {
       ]
     },
     {
+      name = "gcp-dms-firewall-ssh"
+      source_ranges = [
+        "0.0.0.0/0"        
+      ]
+      direction = "INGRESS"
+      allow_list = [
+        {
+          protocol = "tcp"
+          ports    = ["22"]
+        }
+      ]
+    },
+    {
       name               = "gcp-dms-firewall-egress"
       destination_ranges = ["10.0.0.0/16", "10.2.0.0/20"]
       direction          = "EGRESS"
