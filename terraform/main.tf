@@ -56,7 +56,7 @@ module "source_vpc" {
     {
       name = "gcp-dms-firewall-ssh"
       source_ranges = [
-        "0.0.0.0/0"        
+        "0.0.0.0/0"
       ]
       direction = "INGRESS"
       allow_list = [
@@ -286,7 +286,7 @@ module "destination_test_instance_sg" {
     }
   ]
   tags = {
-    Name = "destination-rds-sg"
+    Name = "destination-test-instance-sg"
   }
 }
 
@@ -819,7 +819,10 @@ resource "null_resource" "validate_vpn_connectivity" {
     google_compute_router_peer.gcp_bgp_peer4,
     aws_vpn_gateway_route_propagation.private_routes
   ]
-
+  triggers = {
+    vpn_connection_1_id = aws_vpn_connection.vpn_connection_1.id
+    vpn_connection_2_id = aws_vpn_connection.vpn_connection_2.id
+  }
   provisioner "local-exec" {
     command = <<-EOT
       echo "Waiting for VPN tunnels to establish..."
