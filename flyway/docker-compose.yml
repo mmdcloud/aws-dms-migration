@@ -1,0 +1,85 @@
+# =============================================================================
+# docker-compose.yml
+# Flyway Feature: Containerised migration runner
+# Purpose: Run Flyway migrations from CI pipeline (CodeBuild/GitHub Actions)
+#          or locally for development testing against a local MySQL.
+#
+# Usage (local dev against local MySQL):
+#   docker compose up mysql -d
+#   docker compose run --rm flyway migrate
+#
+# Usage (CI against real RDS — pass env vars from pipeline):
+#   RDS_ENDPOINT=<rds-host> RDS_USER=<u> RDS_PASSWORD=<p> \
+#     docker compose run --rm flyway-rds migrate
+# =============================================================================
+
+version: "3.9"
+
+services:
+
+  # -----------------------------------------------------------------------
+  # Local MySQL — mirrors Cloud SQL / RDS MySQL 8.0 for dev/CI testing
+  # -----------------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: flyway-local-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: localroot
+      MYSQL_DATABASE: destinationdb
+      MYSQL_USER: flyway
+      MYSQL_PASSWORD: flyway_local_pw
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "flyway", "-pflyway_local_pw"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  # -----------------------------------------------------------------------
+  # Flyway against local MySQL (dev / unit testing)
+  # -----------------------------------------------------------------------
+  flyway:
+    image: flyway/flyway:10
+    container_name: flyway-runner
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      FLYWAY_URL: jdbc:mysql://mysql:3306/destinationdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      FLYWAY_USER: flyway
+      FLYWAY_PASSWORD: flyway_local_pw
+      FLYWAY_SCHEMAS: destinationdb
+      FLYWAY_VALIDATE_ON_MIGRATE: "true"
+      FLYWAY_CLEAN_DISABLED: "true"
+      FLYWAY_OUT_OF_ORDER: "false"
+    volumes:
+      - ../migrations:/flyway/sql/migrations
+      - ../callbacks:/flyway/sql/callbacks
+      - ../conf/flyway.conf:/flyway/conf/flyway.conf
+    command: migrate
+
+  # -----------------------------------------------------------------------
+  # Flyway against real RDS (CI/CD pipeline — inject credentials via env)
+  # -----------------------------------------------------------------------
+  flyway-rds:
+    image: flyway/flyway:10
+    container_name: flyway-rds-runner
+    environment:
+      FLYWAY_URL: "jdbc:mysql://${RDS_ENDPOINT}:3306/destinationdb?useSSL=true&requireSSL=true&serverTimezone=UTC"
+      FLYWAY_USER: "${RDS_USER}"
+      FLYWAY_PASSWORD: "${RDS_PASSWORD}"
+      FLYWAY_SCHEMAS: destinationdb
+      FLYWAY_VALIDATE_ON_MIGRATE: "true"
+      FLYWAY_CLEAN_DISABLED: "true"
+      FLYWAY_BASELINE_ON_MIGRATE: "${FLYWAY_BASELINE_ON_MIGRATE:-false}"
+    volumes:
+      - ../migrations:/flyway/sql/migrations
+      - ../callbacks:/flyway/sql/callbacks
+      - ../conf/flyway.conf:/flyway/conf/flyway.conf
+    command: "${FLYWAY_CMD:-migrate}"
+
+volumes:
+  mysql_data:
