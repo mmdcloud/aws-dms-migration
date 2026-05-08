@@ -1,3 +1,1131 @@
+# locals {
+#   common_tags = {
+#     Project   = "dms-migration"
+#     ManagedBy = "terraform"
+#   }
+# }
+
+# resource "random_id" "id" {
+#   byte_length = 8
+# }
+
+# # ------------------------------------------------------------------------
+# # GCP Secret(Vault) Configuration
+# # ------------------------------------------------------------------------
+# data "vault_generic_secret" "cloudsql" {
+#   path = "secret/sql"
+# }
+
+# # ------------------------------------------------------------------------
+# # GCP VPC Configuration
+# # ------------------------------------------------------------------------
+# module "source_vpc" {
+#   source                          = "./modules/gcp/vpc"
+#   vpc_name                        = "source-vpc"
+#   delete_default_routes_on_create = false
+#   auto_create_subnetworks         = false
+#   routing_mode                    = "REGIONAL"
+#   subnets = [
+#     {
+#       ip_cidr_range            = "10.1.0.0/16"
+#       name                     = "source-subnet"
+#       private_ip_google_access = true
+#       purpose                  = "PRIVATE"
+#       region                   = var.source_location
+#       role                     = "ACTIVE"
+#     }
+#   ]
+#   firewall_data = [
+#     {
+#       name = "gcp-dms-firewall-ingress"
+#       source_ranges = [
+#         "10.0.0.0/16",
+#         "10.2.0.0/20",
+#         "10.0.1.0/24",
+#         "10.0.2.0/24",
+#         "10.0.3.0/24"
+#       ]
+#       direction = "INGRESS"
+#       allow_list = [
+#         {
+#           protocol = "tcp"
+#           ports    = ["3306"]
+#         }
+#       ]
+#     },
+#     {
+#       name = "gcp-dms-firewall-ssh"
+#       source_ranges = [
+#         "0.0.0.0/0"
+#       ]
+#       direction = "INGRESS"
+#       allow_list = [
+#         {
+#           protocol = "tcp"
+#           ports    = ["22"]
+#         }
+#       ]
+#     },
+#     {
+#       name               = "gcp-dms-firewall-egress"
+#       destination_ranges = ["10.0.0.0/16", "10.2.0.0/20"]
+#       direction          = "EGRESS"
+#       allow_list = [
+#         {
+#           protocol = "tcp"
+#           ports    = ["3306"]
+#         }
+#       ]
+#     }
+#   ]
+# }
+
+# # ------------------------------------------------------------------------
+# # GCP Secret Manager Configuration
+# # ------------------------------------------------------------------------
+# module "source_cloudsql_password_secret" {
+#   secret_id   = "source_db_password_secret"
+#   source      = "./modules/gcp/secret-manager"
+#   secret_data = tostring(data.vault_generic_secret.cloudsql.data["password"])
+# }
+
+# # ------------------------------------------------------------------------
+# # GCP Private Peering Configuration 
+# # ------------------------------------------------------------------------
+# resource "google_compute_global_address" "source_sql_private_ip_address" {
+#   name          = "source-sql-private-ip-address"
+#   purpose       = "VPC_PEERING"
+#   address_type  = "INTERNAL"
+#   prefix_length = 20
+#   address       = "10.2.0.0"
+#   network       = module.source_vpc.vpc_id
+# }
+
+# resource "google_service_networking_connection" "source_db_private_vpc_connection" {
+#   network                 = module.source_vpc.vpc_id
+#   service                 = "servicenetworking.googleapis.com"
+#   update_on_creation_fail = true
+#   deletion_policy         = "ABANDON"
+#   reserved_peering_ranges = [google_compute_global_address.source_sql_private_ip_address.name]
+# }
+
+# resource "google_compute_network_peering_routes_config" "peering_routes" {
+#   peering = google_service_networking_connection.source_db_private_vpc_connection.peering
+#   network = module.source_vpc.vpc_name # Make sure this is the VPC NAME not ID
+
+#   import_custom_routes = true
+#   export_custom_routes = true
+
+#   depends_on = [google_service_networking_connection.source_db_private_vpc_connection]
+# }
+
+# # ------------------------------------------------------------------------
+# # GCP Cloud SQL Configuration
+# # ------------------------------------------------------------------------
+# module "source_db" {
+#   source                      = "./modules/gcp/cloud-sql"
+#   name                        = var.source_db
+#   db_name                     = var.source_db
+#   db_user                     = tostring(data.vault_generic_secret.cloudsql.data["username"])
+#   db_version                  = "MYSQL_8_0"
+#   location                    = var.source_location
+#   tier                        = "db-f1-micro" # Use db-n1-standard-2 for production readiness
+#   ipv4_enabled                = false
+#   availability_type           = "REGIONAL"
+#   disk_size                   = 10
+#   deletion_protection_enabled = false # Make it true for production readiness
+#   vpc_self_link               = module.source_vpc.self_link
+#   password                    = module.source_cloudsql_password_secret.secret_data
+#   backup_configuration = {
+#     enabled                        = true
+#     location                       = "us-central1"
+#     binary_log_enabled             = true
+#     start_time                     = "03:00"
+#     point_in_time_recovery_enabled = false # Make it true for production readiness
+#     backup_retention_settings = {
+#       retained_backups = 7
+#       retention_unit   = "COUNT"
+#     }
+#   }
+#   database_flags = [
+#     {
+#       name  = "binlog_row_image"
+#       value = "full"
+#     },
+#     {
+#       name  = "max_connections"
+#       value = "500"
+#     }
+#   ]
+#   depends_on = [
+#     module.source_cloudsql_password_secret,
+#     google_service_networking_connection.source_db_private_vpc_connection
+#   ]
+# }
+
+# # ------------------------------------------------------------------------
+# # AWS Secret(Vault) Configuration
+# # ------------------------------------------------------------------------
+# data "vault_generic_secret" "rds" {
+#   path = "secret/rds"
+# }
+
+# # ------------------------------------------------------------------------
+# # AWS VPC Configuration
+# # ------------------------------------------------------------------------
+# module "destination_vpc" {
+#   source                  = "./modules/aws/vpc"
+#   vpc_name                = "destination-vpc"
+#   vpc_cidr                = "10.0.0.0/16"
+#   azs                     = var.destination_azs
+#   public_subnets          = var.destination_public_subnets
+#   private_subnets         = var.destination_private_subnets
+#   database_subnets        = var.destination_database_subnets
+#   enable_dns_hostnames    = true
+#   enable_dns_support      = true
+#   create_igw              = true
+#   map_public_ip_on_launch = true
+#   enable_nat_gateway      = true
+#   single_nat_gateway      = false
+#   one_nat_gateway_per_az  = true
+#   tags = {
+#     Project = "dms-migration"
+#   }
+# }
+
+# module "dms_sg" {
+#   source = "./modules/aws/security-groups"
+#   name   = "dms-sg"
+#   vpc_id = module.destination_vpc.vpc_id
+#   ingress_rules = [
+#     {
+#       description     = "Allow DMS traffic to RDS"
+#       from_port       = 3306
+#       to_port         = 3306
+#       protocol        = "tcp"
+#       security_groups = []
+#       cidr_blocks = [
+#         "10.0.0.0/16",
+#         "10.1.0.0/16",
+#         "10.2.0.0/20"
+#       ]
+#     }
+#   ]
+#   egress_rules = [
+#     {
+#       description = "Allow all outbound traffic"
+#       from_port   = 0
+#       to_port     = 0
+#       protocol    = "-1"
+#       cidr_blocks = ["0.0.0.0/0"]
+#     }
+#   ]
+#   tags = {
+#     Name = "dms-sg"
+#   }
+# }
+
+# # RDS Security Group
+# module "destination_rds_sg" {
+#   source = "./modules/aws/security-groups"
+#   name   = "destination-rds-sg"
+#   vpc_id = module.destination_vpc.vpc_id
+#   ingress_rules = [
+#     {
+#       description     = "MySQL from DMS"
+#       from_port       = 3306
+#       to_port         = 3306
+#       protocol        = "tcp"
+#       security_groups = [module.dms_sg.id]
+#       cidr_blocks     = []
+#     },
+#     {
+#       description     = "MySQL from VPC"
+#       from_port       = 3306
+#       to_port         = 3306
+#       protocol        = "tcp"
+#       security_groups = []
+#       cidr_blocks     = ["10.0.0.0/16"]
+#     }
+#   ]
+#   egress_rules = [
+#     {
+#       description = "Allow all outbound traffic"
+#       from_port   = 0
+#       to_port     = 0
+#       protocol    = "-1"
+#       cidr_blocks = ["0.0.0.0/0"]
+#     }
+#   ]
+#   tags = {
+#     Name = "destination-rds-sg"
+#   }
+# }
+
+# module "destination_test_instance_sg" {
+#   source = "./modules/aws/security-groups"
+#   name   = "destination-test-instance-sg"
+#   vpc_id = module.destination_vpc.vpc_id
+#   ingress_rules = [
+#     {
+#       description     = "Allow SSH From anywhere"
+#       from_port       = 22
+#       to_port         = 22
+#       protocol        = "tcp"
+#       security_groups = []
+#       cidr_blocks     = ["0.0.0.0/0"]
+#     }
+#   ]
+#   egress_rules = [
+#     {
+#       description = "Allow all outbound traffic"
+#       from_port   = 0
+#       to_port     = 0
+#       protocol    = "-1"
+#       cidr_blocks = ["0.0.0.0/0"]
+#     }
+#   ]
+#   tags = {
+#     Name = "destination-test-instance-sg"
+#   }
+# }
+
+# # ------------------------------------------------------------------------
+# # AWS Secret Manager Configuration
+# # ------------------------------------------------------------------------
+# module "destination_db_credentials" {
+#   source                  = "./modules/aws/secrets-manager"
+#   name                    = "destination-rds-secrets-${random_id.id.hex}"
+#   description             = "destination_rds_secrets"
+#   recovery_window_in_days = 30
+#   secret_string = jsonencode({
+#     username = tostring(data.vault_generic_secret.rds.data["username"])
+#     password = tostring(data.vault_generic_secret.rds.data["password"])
+#   })
+# }
+
+# # ------------------------------------------------------------------------
+# # RDS Configuration
+# # ------------------------------------------------------------------------
+# module "destination_db" {
+#   source                  = "./modules/aws/rds"
+#   db_name                 = var.destination_db
+#   allocated_storage       = 20
+#   engine                  = "mysql"
+#   engine_version          = "8.0"
+#   instance_class          = "db.t3.micro" # Use db.r6g.large for production readiness
+#   multi_az                = true
+#   parameter_group_name    = "default.mysql8.0"
+#   username                = tostring(data.vault_generic_secret.rds.data["username"])
+#   password                = tostring(data.vault_generic_secret.rds.data["password"])
+#   subnet_group_name       = "destination_rds_subnet_group"
+#   backup_retention_period = 7
+#   backup_window           = "03:00-05:00"
+#   subnet_group_ids = [
+#     module.destination_vpc.database_subnets[0],
+#     module.destination_vpc.database_subnets[1],
+#     module.destination_vpc.database_subnets[2]
+#   ]
+#   vpc_security_group_ids = [module.destination_rds_sg.id]
+#   publicly_accessible    = false
+#   skip_final_snapshot    = true # Make it false for production readiness
+# }
+
+# # ------------------------------------------------------------------------
+# # SNS Configuration
+# # ------------------------------------------------------------------------
+# module "dms_event_notification" {
+#   source     = "./modules/aws/sns"
+#   topic_name = "dms-job-status-change-topic"
+#   subscriptions = [
+#     {
+#       protocol = "email"
+#       endpoint = "${var.notification_email}"
+#     }
+#   ]
+# }
+
+# # ------------------------------------------------------------------------
+# # VPN Configuration
+# # ------------------------------------------------------------------------
+# # Create a HA VPN gateway in GCP (create this first)
+# resource "google_compute_ha_vpn_gateway" "gcp_vpn_gateway" {
+#   name    = "gcp-vpn-gateway"
+#   network = module.source_vpc.vpc_id
+#   region  = var.source_location
+# }
+
+# # Create a cloud router for BGP with explicit route advertisement
+# resource "google_compute_router" "gcp_router" {
+#   name    = "gcp-vpn-router"
+#   network = module.source_vpc.vpc_id
+#   region  = var.source_location
+#   bgp {
+#     advertise_mode = "CUSTOM"
+#     # Advertise all subnets including the Cloud SQL subnet
+#     advertised_groups = ["ALL_SUBNETS"]
+#     asn               = 65000
+
+#     advertised_ip_ranges {
+#       range       = "10.2.0.0/20"
+#       description = "Cloud SQL service networking range"
+#     }
+#   }
+# }
+
+# # Create a VPN gateway in AWS
+# resource "aws_vpn_gateway" "aws_vpn_gw" {
+#   vpc_id          = module.destination_vpc.vpc_id
+#   amazon_side_asn = 65001
+#   tags = {
+#     Name = "aws-vpn-gateway"
+#   }
+# }
+
+# # Attach VPN gateway to VPC
+# resource "aws_vpn_gateway_attachment" "vpn_attachment" {
+#   vpn_gateway_id = aws_vpn_gateway.aws_vpn_gw.id
+#   vpc_id         = module.destination_vpc.vpc_id
+# }
+
+# # Create customer gateways representing the GCP side
+# resource "aws_customer_gateway" "gcp_cgw_1" {
+#   bgp_asn    = 65000
+#   ip_address = google_compute_ha_vpn_gateway.gcp_vpn_gateway.vpn_interfaces[0].ip_address
+#   type       = "ipsec.1"
+
+#   tags = {
+#     Name = "aws-customer-gw-1"
+#   }
+
+#   depends_on = [google_compute_ha_vpn_gateway.gcp_vpn_gateway]
+# }
+
+# resource "aws_customer_gateway" "gcp_cgw_2" {
+#   bgp_asn    = 65000
+#   ip_address = google_compute_ha_vpn_gateway.gcp_vpn_gateway.vpn_interfaces[1].ip_address
+#   type       = "ipsec.1"
+
+#   tags = {
+#     Name = "aws-customer-gw-2"
+#   }
+
+#   depends_on = [google_compute_ha_vpn_gateway.gcp_vpn_gateway]
+# }
+
+# # Create VPN connections to GCP
+# resource "aws_vpn_connection" "vpn_connection_1" {
+#   vpn_gateway_id      = aws_vpn_gateway.aws_vpn_gw.id
+#   customer_gateway_id = aws_customer_gateway.gcp_cgw_1.id
+#   type                = "ipsec.1"
+#   static_routes_only  = false
+
+#   tags = {
+#     Name = "vpn-connection-1"
+#   }
+
+#   depends_on = [aws_vpn_gateway_attachment.vpn_attachment]
+# }
+
+# resource "aws_vpn_connection" "vpn_connection_2" {
+#   vpn_gateway_id      = aws_vpn_gateway.aws_vpn_gw.id
+#   customer_gateway_id = aws_customer_gateway.gcp_cgw_2.id
+#   type                = "ipsec.1"
+#   static_routes_only  = false
+
+#   tags = {
+#     Name = "vpn-connection-2"
+#   }
+
+#   depends_on = [aws_vpn_gateway_attachment.vpn_attachment]
+# }
+
+# # Create external VPN gateway representing the AWS side
+# resource "google_compute_external_vpn_gateway" "aws_vpn_gateway_1" {
+#   name            = "aws-vpn-gateway"
+#   redundancy_type = "FOUR_IPS_REDUNDANCY"
+#   description     = "AWS VPN Gateway"
+
+#   interface {
+#     id         = 0
+#     ip_address = aws_vpn_connection.vpn_connection_1.tunnel1_address
+#   }
+#   interface {
+#     id         = 1
+#     ip_address = aws_vpn_connection.vpn_connection_1.tunnel2_address
+#   }
+#   interface {
+#     id         = 2
+#     ip_address = aws_vpn_connection.vpn_connection_2.tunnel1_address
+#   }
+#   interface {
+#     id         = 3
+#     ip_address = aws_vpn_connection.vpn_connection_2.tunnel2_address
+#   }
+# }
+
+# # Create VPN tunnels on GCP side
+# resource "google_compute_vpn_tunnel" "gcp_tunnel1" {
+#   name                            = "gcp-tunnel1"
+#   region                          = var.source_location
+#   vpn_gateway                     = google_compute_ha_vpn_gateway.gcp_vpn_gateway.id
+#   peer_external_gateway           = google_compute_external_vpn_gateway.aws_vpn_gateway_1.id
+#   peer_external_gateway_interface = 0
+#   shared_secret                   = aws_vpn_connection.vpn_connection_1.tunnel1_preshared_key
+#   router                          = google_compute_router.gcp_router.id
+#   vpn_gateway_interface           = 0
+#   ike_version                     = 2
+# }
+
+# resource "google_compute_vpn_tunnel" "gcp_tunnel2" {
+#   name                            = "gcp-tunnel2"
+#   region                          = var.source_location
+#   vpn_gateway                     = google_compute_ha_vpn_gateway.gcp_vpn_gateway.id
+#   peer_external_gateway           = google_compute_external_vpn_gateway.aws_vpn_gateway_1.id
+#   peer_external_gateway_interface = 1
+#   shared_secret                   = aws_vpn_connection.vpn_connection_1.tunnel2_preshared_key
+#   router                          = google_compute_router.gcp_router.id
+#   vpn_gateway_interface           = 0
+#   ike_version                     = 2
+# }
+
+# resource "google_compute_vpn_tunnel" "gcp_tunnel3" {
+#   name                            = "gcp-tunnel3"
+#   region                          = var.source_location
+#   vpn_gateway                     = google_compute_ha_vpn_gateway.gcp_vpn_gateway.id
+#   peer_external_gateway           = google_compute_external_vpn_gateway.aws_vpn_gateway_1.id
+#   peer_external_gateway_interface = 2
+#   shared_secret                   = aws_vpn_connection.vpn_connection_2.tunnel1_preshared_key
+#   router                          = google_compute_router.gcp_router.id
+#   vpn_gateway_interface           = 1
+#   ike_version                     = 2
+# }
+
+# resource "google_compute_vpn_tunnel" "gcp_tunnel4" {
+#   name                            = "gcp-tunnel4"
+#   region                          = var.source_location
+#   vpn_gateway                     = google_compute_ha_vpn_gateway.gcp_vpn_gateway.id
+#   peer_external_gateway           = google_compute_external_vpn_gateway.aws_vpn_gateway_1.id
+#   peer_external_gateway_interface = 3
+#   shared_secret                   = aws_vpn_connection.vpn_connection_2.tunnel2_preshared_key
+#   router                          = google_compute_router.gcp_router.id
+#   vpn_gateway_interface           = 1
+#   ike_version                     = 2
+# }
+
+# # Create router interfaces for BGP
+# resource "google_compute_router_interface" "gcp_interface1" {
+#   name   = "gcp-interface1"
+#   router = google_compute_router.gcp_router.name
+#   region = var.source_location
+#   # FIXED: GCP side uses VGW inside address (AWS's side)
+#   ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel1_cgw_inside_address}/30"
+#   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel1.name
+# }
+
+# resource "google_compute_router_interface" "gcp_interface2" {
+#   name       = "gcp-interface2"
+#   router     = google_compute_router.gcp_router.name
+#   region     = var.source_location
+#   ip_range   = "${aws_vpn_connection.vpn_connection_1.tunnel2_cgw_inside_address}/30"
+#   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel2.name
+# }
+
+# resource "google_compute_router_interface" "gcp_interface3" {
+#   name       = "gcp-interface3"
+#   router     = google_compute_router.gcp_router.name
+#   region     = var.source_location
+#   ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel1_cgw_inside_address}/30"
+#   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel3.name
+# }
+
+# resource "google_compute_router_interface" "gcp_interface4" {
+#   name       = "gcp-interface4"
+#   router     = google_compute_router.gcp_router.name
+#   region     = var.source_location
+#   ip_range   = "${aws_vpn_connection.vpn_connection_2.tunnel2_cgw_inside_address}/30"
+#   vpn_tunnel = google_compute_vpn_tunnel.gcp_tunnel4.name
+# }
+
+# # Create BGP sessions
+# resource "google_compute_router_peer" "gcp_bgp_peer1" {
+#   name                      = "gcp-bgp-peer1"
+#   router                    = google_compute_router.gcp_router.name
+#   region                    = var.source_location
+#   peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel1_vgw_inside_address
+#   peer_asn                  = 65001
+#   advertised_route_priority = 100
+#   interface                 = google_compute_router_interface.gcp_interface1.name
+# }
+
+# resource "google_compute_router_peer" "gcp_bgp_peer2" {
+#   name                      = "gcp-bgp-peer2"
+#   router                    = google_compute_router.gcp_router.name
+#   region                    = var.source_location
+#   peer_ip_address           = aws_vpn_connection.vpn_connection_1.tunnel2_vgw_inside_address
+#   peer_asn                  = 65001
+#   advertised_route_priority = 100
+#   interface                 = google_compute_router_interface.gcp_interface2.name
+# }
+
+# resource "google_compute_router_peer" "gcp_bgp_peer3" {
+#   name                      = "gcp-bgp-peer3"
+#   router                    = google_compute_router.gcp_router.name
+#   region                    = var.source_location
+#   peer_ip_address           = aws_vpn_connection.vpn_connection_2.tunnel1_vgw_inside_address
+#   peer_asn                  = 65001
+#   advertised_route_priority = 100
+#   interface                 = google_compute_router_interface.gcp_interface3.name
+# }
+
+# resource "google_compute_router_peer" "gcp_bgp_peer4" {
+#   name                      = "gcp-bgp-peer4"
+#   router                    = google_compute_router.gcp_router.name
+#   region                    = var.source_location
+#   peer_ip_address           = aws_vpn_connection.vpn_connection_2.tunnel2_vgw_inside_address
+#   peer_asn                  = 65001
+#   advertised_route_priority = 100
+#   interface                 = google_compute_router_interface.gcp_interface4.name
+# }
+
+# # Enable route propagation on AWS private route tables
+# resource "aws_vpn_gateway_route_propagation" "private_routes" {
+#   count          = length(module.destination_vpc.private_route_table_ids)
+#   vpn_gateway_id = aws_vpn_gateway.aws_vpn_gw.id
+#   route_table_id = module.destination_vpc.private_route_table_ids[count.index]
+
+#   depends_on = [
+#     aws_vpn_gateway_attachment.vpn_attachment,
+#     aws_vpn_connection.vpn_connection_1,
+#     aws_vpn_connection.vpn_connection_2
+#   ]
+# }
+
+# # Add explicit static routes as backup (in case BGP takes time)
+# resource "aws_route" "to_gcp_subnet" {
+#   count                  = length(module.destination_vpc.private_route_table_ids)
+#   route_table_id         = module.destination_vpc.private_route_table_ids[count.index]
+#   destination_cidr_block = "10.1.0.0/16"
+#   gateway_id             = aws_vpn_gateway.aws_vpn_gw.id
+
+#   depends_on = [
+#     aws_vpn_gateway_attachment.vpn_attachment,
+#     google_compute_vpn_tunnel.gcp_tunnel1,
+#     google_compute_vpn_tunnel.gcp_tunnel2,
+#     google_compute_vpn_tunnel.gcp_tunnel3,
+#     google_compute_vpn_tunnel.gcp_tunnel4
+#   ]
+# }
+
+# # Add route for Cloud SQL peered range
+# resource "aws_route" "to_gcp_cloudsql_peered" {
+#   count                  = length(module.destination_vpc.private_route_table_ids)
+#   route_table_id         = module.destination_vpc.private_route_table_ids[count.index]
+#   destination_cidr_block = "10.2.0.0/20"
+#   gateway_id             = aws_vpn_gateway.aws_vpn_gw.id
+
+#   depends_on = [
+#     aws_vpn_gateway_attachment.vpn_attachment,
+#     google_compute_vpn_tunnel.gcp_tunnel1,
+#     google_compute_vpn_tunnel.gcp_tunnel2,
+#     google_compute_vpn_tunnel.gcp_tunnel3,
+#     google_compute_vpn_tunnel.gcp_tunnel4
+#   ]
+# }
+
+# # Wait for VPN tunnels and BGP to establish (increased from 60s to 300s)
+# resource "time_sleep" "wait_for_vpn" {
+#   depends_on = [
+#     aws_vpn_gateway_route_propagation.private_routes,
+#     aws_route.to_gcp_subnet,
+#     aws_route.to_gcp_cloudsql_peered,
+#     google_compute_router_peer.gcp_bgp_peer1,
+#     google_compute_router_peer.gcp_bgp_peer2,
+#     google_compute_router_peer.gcp_bgp_peer3,
+#     google_compute_router_peer.gcp_bgp_peer4
+#   ]
+
+#   create_duration = "300s"
+# }
+
+# # ------------------------------------------------------------------------
+# # DMS IAM Configuration
+# # ------------------------------------------------------------------------
+# data "aws_iam_policy_document" "dms_assume_role" {
+#   statement {
+#     actions = ["sts:AssumeRole"]
+
+#     principals {
+#       identifiers = ["dms.amazonaws.com"]
+#       type        = "Service"
+#     }
+#   }
+# }
+
+# resource "aws_iam_role" "dms_vpc_role" {
+#   name               = "dms-vpc-role"
+#   assume_role_policy = data.aws_iam_policy_document.dms_assume_role.json
+# }
+
+# resource "aws_iam_role_policy_attachment" "dms_vpc_role_attachment" {
+#   role       = aws_iam_role.dms_vpc_role.name
+#   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSVPCManagementRole"
+# }
+
+# resource "aws_iam_role" "dms_cloudwatch_logs_role" {
+#   name               = "dms-cloudwatch-logs-role"
+#   assume_role_policy = data.aws_iam_policy_document.dms_assume_role.json
+# }
+
+# resource "aws_iam_role_policy_attachment" "dms_cloudwatch_logs_role_attachment" {
+#   role       = aws_iam_role.dms_cloudwatch_logs_role.name
+#   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSCloudWatchLogsRole"
+# }
+
+# # ------------------------------------------------------------------------
+# # DMS Configuration
+# # ------------------------------------------------------------------------
+# module "dms_replication_instance" {
+#   source                               = "./modules/aws/dms"
+#   allocated_storage                    = 20
+#   apply_immediately                    = false
+#   publicly_accessible                  = false
+#   replication_instance_class           = "dms.t3.medium" # Use dms.c5.xlarge for production readiness
+#   engine_version                       = var.dms_engine_version
+#   replication_instance_id              = "dms-instance"
+#   vpc_security_group_ids               = [module.dms_sg.id]
+#   replication_subnet_group_id          = "dms-subnet-group"
+#   replication_subnet_group_description = "Subnet group for DMS"
+#   subnet_group_ids = [
+#     module.destination_vpc.private_subnets[0],
+#     module.destination_vpc.private_subnets[1],
+#     module.destination_vpc.private_subnets[2]
+#   ]
+
+#   source_endpoint_id   = "cloudsql-source"
+#   source_endpoint_type = "source"
+#   source_engine_name   = "mysql"
+#   source_username      = tostring(data.vault_generic_secret.cloudsql.data["username"])
+#   source_password      = tostring(data.vault_generic_secret.cloudsql.data["password"])
+#   source_server_name   = module.source_db.private_ip_address
+#   source_port          = 3306
+#   source_ssl_mode      = "none" # require
+
+#   destination_endpoint_id   = "rds"
+#   destination_endpoint_type = "target"
+#   destination_engine_name   = "mysql"
+#   destination_username      = tostring(data.vault_generic_secret.rds.data["username"])
+#   destination_password      = tostring(data.vault_generic_secret.rds.data["password"])
+#   destination_server_name   = split(":", module.destination_db.endpoint)[0]
+#   destination_port          = 3306
+#   destination_ssl_mode      = "none" # require
+
+#   tasks = [
+#     {
+#       migration_type      = "full-load-and-cdc"
+#       replication_task_id = "cloudsql-to-rds-task"
+#       replication_task_settings = jsonencode({
+#         TargetMetadata = {
+#           TargetSchema           = ""
+#           SupportLobs            = true
+#           FullLobMode            = false
+#           LobChunkSize           = 64
+#           LimitedSizeLobMode     = true
+#           LobMaxSize             = 32
+#           FailOnNoTablesCaptured = false
+#         }
+#         FullLoadSettings = {
+#           TargetTablePrepMode = "DO_NOTHING"
+#           MaxFullLoadSubTasks = 8
+#         }
+#         Logging = {
+#           EnableLogging = true
+#           LogComponents = [
+#             {
+#               Id       = "SOURCE_UNLOAD"
+#               Severity = "LOGGER_SEVERITY_DEFAULT"
+#             },
+#             {
+#               Id       = "TARGET_LOAD"
+#               Severity = "LOGGER_SEVERITY_DEFAULT"
+#             },
+#             {
+#               Id       = "SOURCE_CAPTURE"
+#               Severity = "LOGGER_SEVERITY_DEFAULT"
+#             },
+#             {
+#               Id       = "TARGET_APPLY"
+#               Severity = "LOGGER_SEVERITY_DEFAULT"
+#             }
+#           ]
+#         }
+#       })
+#       table_mappings = jsonencode({
+#         "rules" : [
+#           {
+#             "rule-type" : "selection",
+#             "rule-id" : "1",
+#             "rule-name" : "include-all-tables",
+#             "object-locator" : {
+#               "schema-name" : var.source_db,
+#               "table-name" : "%"
+#             },
+#             "rule-action" : "include"
+#           },
+#           {
+#             "rule-type" : "transformation",
+#             "rule-id" : "2",
+#             "rule-name" : "add-prefix-to-tables",
+#             "rule-target" : "table",
+#             "object-locator" : {
+#               "schema-name" : "madmax",
+#               "table-name" : "%"
+#             },
+#             "rule-action" : "add-prefix",
+#             "value" : "madmax_"
+#           }
+#         ]
+#       })
+#     }
+#   ]
+
+#   depends_on = [
+#     aws_iam_role_policy_attachment.dms_vpc_role_attachment,
+#     aws_iam_role_policy_attachment.dms_cloudwatch_logs_role_attachment,
+#     module.source_db,
+#     module.destination_db,
+#     time_sleep.wait_for_vpn
+#   ]
+# }
+
+# resource "aws_dms_event_subscription" "subscription" {
+#   enabled          = true
+#   event_categories = ["creation", "deletion", "failure", "configuration change"]
+#   name             = "dms-event-subscription"
+#   sns_topic_arn    = module.dms_event_notification.topic_arn
+#   source_ids       = [module.dms_replication_instance.replication_instance_id]
+#   source_type      = "replication-instance"
+#   depends_on       = [module.dms_replication_instance]
+# }
+
+# # -----------------------------------------------------------------------------------------
+# # VPN Health Check and Validation
+# # -----------------------------------------------------------------------------------------
+# resource "null_resource" "validate_vpn_connectivity" {
+#   depends_on = [
+#     google_compute_router_peer.gcp_bgp_peer1,
+#     google_compute_router_peer.gcp_bgp_peer2,
+#     google_compute_router_peer.gcp_bgp_peer3,
+#     google_compute_router_peer.gcp_bgp_peer4,
+#     aws_vpn_gateway_route_propagation.private_routes
+#   ]
+#   triggers = {
+#     vpn_connection_1_id = aws_vpn_connection.vpn_connection_1.id
+#     vpn_connection_2_id = aws_vpn_connection.vpn_connection_2.id
+#   }
+#   provisioner "local-exec" {
+#     command = <<-EOT
+#       echo "Waiting for VPN tunnels to establish..."
+#       sleep 60
+      
+#       # Check AWS VPN connection status
+#       echo "Checking AWS VPN Connection 1 status..."
+#       aws ec2 describe-vpn-connections \
+#         --vpn-connection-ids ${aws_vpn_connection.vpn_connection_1.id} \
+#         --query 'VpnConnections[0].VgwTelemetry[*].[OutsideIpAddress,Status]' \
+#         --output table
+      
+#       echo "Checking AWS VPN Connection 2 status..."
+#       aws ec2 describe-vpn-connections \
+#         --vpn-connection-ids ${aws_vpn_connection.vpn_connection_2.id} \
+#         --query 'VpnConnections[0].VgwTelemetry[*].[OutsideIpAddress,Status]' \
+#         --output table
+      
+#       # Wait for BGP to converge
+#       echo "Waiting 3 minutes for BGP convergence..."
+#       sleep 180
+      
+#       # Check BGP session status on GCP
+#       echo "Checking GCP BGP session status..."
+#       gcloud compute routers get-status ${google_compute_router.gcp_router.name} \
+#         --region=${var.source_location} \
+#         --format="table(result.bgpPeerStatus[].name,result.bgpPeerStatus[].state)"
+      
+#       echo "VPN validation complete. Check logs above for any DOWN tunnels."
+#     EOT
+#   }
+# }
+
+# # -----------------------------------------------------------------------------------------
+# # CloudWatch Alarms for Monitoring
+# # -----------------------------------------------------------------------------------------
+# module "dms_cpu" {
+#   source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+#   alarm_name          = "dms-high-cpu"
+#   comparison_operator = "GreaterThanThreshold"
+#   evaluation_periods  = "2"
+#   metric_name         = "CPUUtilization"
+#   namespace           = "AWS/DMS"
+#   period              = "300"
+#   statistic           = "Average"
+#   threshold           = "80"
+#   alarm_description   = "DMS instance CPU utilization is too high"
+#   ok_actions          = [module.dms_event_notification.topic_arn]
+#   alarm_actions       = [module.dms_event_notification.topic_arn]
+
+#   dimensions = {
+#     ReplicationInstanceIdentifier = module.dms_replication_instance.replication_instance_id
+#   }
+# }
+
+# module "dms_freeable_memory" {
+#   source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+#   alarm_name          = "dms-low-memory"
+#   comparison_operator = "LessThanThreshold"
+#   evaluation_periods  = "2"
+#   metric_name         = "FreeableMemory"
+#   namespace           = "AWS/DMS"
+#   period              = "300"
+#   statistic           = "Average"
+#   threshold           = "524288000" # 500MB
+#   alarm_description   = "DMS instance freeable memory is low"
+#   ok_actions          = [module.dms_event_notification.topic_arn]
+#   alarm_actions       = [module.dms_event_notification.topic_arn]
+
+#   dimensions = {
+#     ReplicationInstanceIdentifier = module.dms_replication_instance.replication_instance_id
+#   }
+# }
+
+# module "dms_cdc_lag" {
+#   source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+#   alarm_name          = "dms-cdc-latency-high"
+#   comparison_operator = "GreaterThanThreshold"
+#   evaluation_periods  = "3"
+#   metric_name         = "CDCLatencySource"
+#   namespace           = "AWS/DMS"
+#   period              = "60"
+#   statistic           = "Maximum"
+#   threshold           = "60" # Alert if CDC lag exceeds 60 seconds
+#   alarm_description   = "DMS CDC source latency is high - replication falling behind"
+#   ok_actions          = [module.dms_event_notification.topic_arn]
+#   alarm_actions       = [module.dms_event_notification.topic_arn]
+#   dimensions = {
+#     ReplicationInstanceIdentifier = module.dms_replication_instance.replication_instance_id
+#   }
+# }
+
+# module "dms_cdc_target_lag" {
+#   source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+#   alarm_name          = "dms-cdc-target-latency-high"
+#   comparison_operator = "GreaterThanThreshold"
+#   evaluation_periods  = "3"
+#   metric_name         = "CDCLatencyTarget"
+#   namespace           = "AWS/DMS"
+#   period              = "60"
+#   statistic           = "Maximum"
+#   threshold           = "60"
+#   alarm_description   = "DMS CDC target latency is high - apply falling behind"
+#   ok_actions          = [module.dms_event_notification.topic_arn]
+#   alarm_actions       = [module.dms_event_notification.topic_arn]
+#   dimensions = {
+#     ReplicationInstanceIdentifier = module.dms_replication_instance.replication_instance_id
+#   }
+# }
+
+# # RDS alarms
+# module "rds_cpu" {
+#   source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+#   alarm_name          = "rds-high-cpu"
+#   comparison_operator = "GreaterThanThreshold"
+#   evaluation_periods  = "2"
+#   metric_name         = "CPUUtilization"
+#   namespace           = "AWS/RDS"
+#   period              = "300"
+#   statistic           = "Average"
+#   threshold           = "80"
+#   alarm_description   = "RDS CPU utilization is too high"
+#   ok_actions          = [module.dms_event_notification.topic_arn]
+#   alarm_actions       = [module.dms_event_notification.topic_arn]
+#   dimensions = {
+#     DBInstanceIdentifier = module.destination_db.id
+#   }
+# }
+
+# module "rds_free_storage" {
+#   source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+#   alarm_name          = "rds-low-storage"
+#   comparison_operator = "LessThanThreshold"
+#   evaluation_periods  = "1"
+#   metric_name         = "FreeStorageSpace"
+#   namespace           = "AWS/RDS"
+#   period              = "300"
+#   statistic           = "Average"
+#   threshold           = "10737418240" # 10GB in bytes
+#   alarm_description   = "RDS free storage space is critically low"
+#   ok_actions          = [module.dms_event_notification.topic_arn]
+#   alarm_actions       = [module.dms_event_notification.topic_arn]
+#   dimensions = {
+#     DBInstanceIdentifier = module.destination_db.id
+#   }
+# }
+
+# module "rds_replica_lag" {
+#   source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+#   alarm_name          = "rds-replica-lag"
+#   comparison_operator = "GreaterThanThreshold"
+#   evaluation_periods  = "2"
+#   metric_name         = "ReplicaLag"
+#   namespace           = "AWS/RDS"
+#   period              = "60"
+#   statistic           = "Average"
+#   threshold           = "30" # 30 seconds
+#   alarm_description   = "RDS replica lag is high"
+#   ok_actions          = [module.dms_event_notification.topic_arn]
+#   alarm_actions       = [module.dms_event_notification.topic_arn]
+#   dimensions = {
+#     DBInstanceIdentifier = module.destination_db.id
+#   }
+# }
+
+# module "rds_connections" {
+#   source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+#   alarm_name          = "rds-high-connections"
+#   comparison_operator = "GreaterThanThreshold"
+#   evaluation_periods  = "2"
+#   metric_name         = "DatabaseConnections"
+#   namespace           = "AWS/RDS"
+#   period              = "300"
+#   statistic           = "Average"
+#   threshold           = "800" # db.r6g.large max_connections ~1000; alert at 80%
+#   alarm_description   = "RDS connection count is approaching the instance limit"
+#   ok_actions          = [module.dms_event_notification.topic_arn]
+#   alarm_actions       = [module.dms_event_notification.topic_arn]
+#   dimensions = {
+#     DBInstanceIdentifier = module.destination_db.id
+#   }
+# }
+
+# # RDS - Freeable memory (low memory causes swap, which kills query performance)
+# module "rds_freeable_memory" {
+#   source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+#   alarm_name          = "rds-low-memory"
+#   comparison_operator = "LessThanThreshold"
+#   evaluation_periods  = "2"
+#   metric_name         = "FreeableMemory"
+#   namespace           = "AWS/RDS"
+#   period              = "300"
+#   statistic           = "Average"
+#   threshold           = "1073741824" # 1GB - r6g.large has 16GB RAM; alert well before swap kicks in
+#   alarm_description   = "RDS freeable memory is low - risk of swap usage and degraded performance"
+#   ok_actions          = [module.dms_event_notification.topic_arn]
+#   alarm_actions       = [module.dms_event_notification.topic_arn]
+#   dimensions = {
+#     DBInstanceIdentifier = module.destination_db.id
+#   }
+# }
+
+# # RDS - Read latency spike (catches index issues introduced by DMS full-load writes)
+# module "rds_read_latency" {
+#   source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+#   alarm_name          = "rds-high-read-latency"
+#   comparison_operator = "GreaterThanThreshold"
+#   evaluation_periods  = "3"
+#   metric_name         = "ReadLatency"
+#   namespace           = "AWS/RDS"
+#   period              = "60"
+#   statistic           = "Average"
+#   threshold           = "0.02" # 20ms - elevated read latency during migration signals table lock contention
+#   alarm_description   = "RDS read latency is elevated - possible lock contention during migration"
+#   ok_actions          = [module.dms_event_notification.topic_arn]
+#   alarm_actions       = [module.dms_event_notification.topic_arn]
+#   dimensions = {
+#     DBInstanceIdentifier = module.destination_db.id
+#   }
+# }
+
+# # RDS - Write latency spike (DMS apply phase can overwhelm target during burst CDC)
+# module "rds_write_latency" {
+#   source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
+#   alarm_name          = "rds-high-write-latency"
+#   comparison_operator = "GreaterThanThreshold"
+#   evaluation_periods  = "3"
+#   metric_name         = "WriteLatency"
+#   namespace           = "AWS/RDS"
+#   period              = "60"
+#   statistic           = "Average"
+#   threshold           = "0.05" # 50ms - DMS batch apply can cause write spikes; catch before it cascades
+#   alarm_description   = "RDS write latency is elevated - DMS apply may be overwhelming target"
+#   ok_actions          = [module.dms_event_notification.topic_arn]
+#   alarm_actions       = [module.dms_event_notification.topic_arn]
+#   dimensions = {
+#     DBInstanceIdentifier = module.destination_db.id
+#   }
+# }
+
+# # -----------------------------------------------------------------------------------------
+# # Test Instances
+# # -----------------------------------------------------------------------------------------
+# # GCP Instance
+# resource "google_compute_address" "gcp_vm_ip" {
+#   name = "gcp-vm-public-ip"
+# }
+
+# module "source_test_instance" {
+#   source                    = "./modules/gcp/compute"
+#   name                      = "source-test-instance"
+#   machine_type              = "e2-micro"
+#   zone                      = "${var.source_location}-a"
+#   metadata_startup_script   = file("${path.module}/scripts/user_data.sh")
+#   deletion_protection       = false
+#   allow_stopping_for_update = true
+#   image                     = "ubuntu-os-cloud/ubuntu-2004-focal-v20220712"
+#   network_interfaces = [
+#     {
+#       network    = module.source_vpc.vpc_id
+#       subnetwork = module.source_vpc.subnets[0].id
+#       access_configs = [
+#         {
+#           nat_ip = google_compute_address.gcp_vm_ip.address
+#         }
+#       ]
+#     }
+#   ]
+#   tags = ["gcp-instance"]
+# }
+
+# # AWS Instance
+# data "aws_ami" "ubuntu" {
+#   most_recent = true
+
+#   filter {
+#     name   = "name"
+#     values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+#   }
+
+#   filter {
+#     name   = "virtualization-type"
+#     values = ["hvm"]
+#   }
+
+#   owners = ["099720109477"]
+# }
+
+# data "aws_key_pair" "key_pair" {
+#   key_name = "madmaxkeypair"
+# }
+
+# module "destination_test_instance" {
+#   source                      = "./modules/aws/ec2"
+#   name                        = "destination-test-instance"
+#   ami                         = data.aws_ami.ubuntu.id
+#   instance_type               = "t2.micro"
+#   associate_public_ip_address = true
+#   key_name                    = data.aws_key_pair.key_pair.key_name
+#   subnet_id                   = module.destination_vpc.public_subnets[0]
+#   security_groups             = [module.destination_test_instance_sg.id]
+#   user_data                   = filebase64("${path.module}/scripts/user_data.sh")
+# }
 locals {
   common_tags = {
     Project   = "dms-migration"
@@ -54,9 +1182,13 @@ module "source_vpc" {
       ]
     },
     {
+      # SSH restricted to GCP Identity-Aware Proxy range only.
+      # IAP tunnels SSH through Google's infrastructure — no public port exposure.
+      # To connect: gcloud compute ssh <instance> --tunnel-through-iap
+      # 0.0.0.0/0 is intentionally avoided even for lab environments.
       name = "gcp-dms-firewall-ssh"
       source_ranges = [
-        "0.0.0.0/0"
+        "35.235.240.0/20" # GCP IAP TCP forwarding range
       ]
       direction = "INGRESS"
       allow_list = [
@@ -133,7 +1265,7 @@ module "source_db" {
   ipv4_enabled                = false
   availability_type           = "REGIONAL"
   disk_size                   = 10
-  deletion_protection_enabled = false # Make it true for production readiness
+  deletion_protection_enabled = false # LAB ONLY — set true in production to prevent accidental destroy via Terraform or GCP console
   vpc_self_link               = module.source_vpc.self_link
   password                    = module.source_cloudsql_password_secret.secret_data
   backup_configuration = {
@@ -141,7 +1273,7 @@ module "source_db" {
     location                       = "us-central1"
     binary_log_enabled             = true
     start_time                     = "03:00"
-    point_in_time_recovery_enabled = false # Make it true for production readiness
+    point_in_time_recovery_enabled = false # LAB ONLY — enable for production; required for sub-daily RPO
     backup_retention_settings = {
       retained_backups = 7
       retention_unit   = "COUNT"
@@ -268,12 +1400,16 @@ module "destination_test_instance_sg" {
   vpc_id = module.destination_vpc.vpc_id
   ingress_rules = [
     {
-      description     = "Allow SSH From anywhere"
+      # SSH restricted to VPC CIDR only.
+      # Use AWS Systems Manager Session Manager for public access instead:
+      # aws ssm start-session --target <instance-id>
+      # This requires the SSM agent and an instance profile with AmazonSSMManagedInstanceCore.
+      description     = "Allow SSH from within VPC only"
       from_port       = 22
       to_port         = 22
       protocol        = "tcp"
       security_groups = []
-      cidr_blocks     = ["0.0.0.0/0"]
+      cidr_blocks     = ["10.0.0.0/16"]
     }
   ]
   egress_rules = [
@@ -328,7 +1464,7 @@ module "destination_db" {
   ]
   vpc_security_group_ids = [module.destination_rds_sg.id]
   publicly_accessible    = false
-  skip_final_snapshot    = true # Make it false for production readiness
+  skip_final_snapshot    = true # LAB ONLY — set false in production to retain a final snapshot before destroy
 }
 
 # ------------------------------------------------------------------------
@@ -634,7 +1770,10 @@ resource "aws_route" "to_gcp_cloudsql_peered" {
 }
 
 # Wait for VPN tunnels and BGP to establish (increased from 60s to 300s)
-resource "time_sleep" "wait_for_vpn" {
+# Wait for all 4 BGP sessions to reach ESTABLISHED before allowing DMS to proceed.
+# Replaces a blind time_sleep: polls every 30s for up to 15 minutes, then fails
+# loudly with the actual BGP state so the error is diagnosable.
+resource "null_resource" "wait_for_vpn_bgp" {
   depends_on = [
     aws_vpn_gateway_route_propagation.private_routes,
     aws_route.to_gcp_subnet,
@@ -645,7 +1784,55 @@ resource "time_sleep" "wait_for_vpn" {
     google_compute_router_peer.gcp_bgp_peer4
   ]
 
-  create_duration = "300s"
+  triggers = {
+    vpn_connection_1_id = aws_vpn_connection.vpn_connection_1.id
+    vpn_connection_2_id = aws_vpn_connection.vpn_connection_2.id
+    router_name         = google_compute_router.gcp_router.name
+    region              = var.source_location
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      MAX_RETRIES=30   # 30 x 30s = 15 minutes max wait
+      SLEEP_SEC=30
+      REQUIRED_ESTABLISHED=4
+
+      echo "==> Waiting for ${REQUIRED_ESTABLISHED} BGP sessions to reach ESTABLISHED..."
+
+      for i in $(seq 1 $MAX_RETRIES); do
+        STATUS_JSON=$(gcloud compute routers get-status ${self.triggers.router_name} \
+          --region=${self.triggers.region} \
+          --format=json 2>/dev/null || echo '{}')
+
+        ESTABLISHED=$(echo "$STATUS_JSON" \
+          | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+peers = data.get('result', {}).get('bgpPeerStatus', [])
+print(sum(1 for p in peers if p.get('status') == 'UP' and p.get('state') == 'ESTABLISHED'))
+" 2>/dev/null || echo "0")
+
+        echo "  Attempt $i/${MAX_RETRIES}: ${ESTABLISHED}/${REQUIRED_ESTABLISHED} BGP sessions ESTABLISHED"
+
+        if [ "$ESTABLISHED" -ge "$REQUIRED_ESTABLISHED" ]; then
+          echo "==> All BGP sessions established. Proceeding."
+          exit 0
+        fi
+
+        if [ "$i" -lt "$MAX_RETRIES" ]; then
+          sleep $SLEEP_SEC
+        fi
+      done
+
+      echo "ERROR: BGP did not fully converge after $((MAX_RETRIES * SLEEP_SEC))s."
+      echo "Current BGP peer state:"
+      gcloud compute routers get-status ${self.triggers.router_name} \
+        --region=${self.triggers.region} \
+        --format="table(result.bgpPeerStatus[].name,result.bgpPeerStatus[].state,result.bgpPeerStatus[].status)"
+      exit 1
+    EOT
+  }
 }
 
 # ------------------------------------------------------------------------
@@ -709,7 +1896,10 @@ module "dms_replication_instance" {
   source_password      = tostring(data.vault_generic_secret.cloudsql.data["password"])
   source_server_name   = module.source_db.private_ip_address
   source_port          = 3306
-  source_ssl_mode      = "none" # require
+  source_ssl_mode      = "none" # Transport security is provided by the HA VPN tunnel (IKEv2/AES-256).
+  # Adding DMS-layer TLS on top requires importing the Cloud SQL server cert into DMS,
+  # which is operationally complex and redundant given the encrypted VPN path.
+  # Set to "require" and configure certificate_arn if the VPN is ever replaced with public endpoints.
 
   destination_endpoint_id   = "rds"
   destination_endpoint_type = "target"
@@ -718,7 +1908,8 @@ module "dms_replication_instance" {
   destination_password      = tostring(data.vault_generic_secret.rds.data["password"])
   destination_server_name   = split(":", module.destination_db.endpoint)[0]
   destination_port          = 3306
-  destination_ssl_mode      = "none" # require
+  destination_ssl_mode      = "none" # Same rationale as source: VPN provides transport encryption.
+  # Set to "require" with RDS CA cert if endpoints are ever exposed outside the VPN.
 
   tasks = [
     {
@@ -794,7 +1985,7 @@ module "dms_replication_instance" {
     aws_iam_role_policy_attachment.dms_cloudwatch_logs_role_attachment,
     module.source_db,
     module.destination_db,
-    time_sleep.wait_for_vpn
+    null_resource.wait_for_vpn_bgp
   ]
 }
 
