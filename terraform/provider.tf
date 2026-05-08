@@ -17,13 +17,13 @@ terraform {
       version = "3.8.1"
     }
   }
-  backend "s3" {
-    bucket         = "dms-migration-project-bucket"
-    key            = "dms-migration-project-bucket/terraform.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
-    dynamodb_table = "dms-migration-terraform-state-lock"
-  }
+  # backend "s3" {
+  #   bucket         = "dms-migration-project-bucket"
+  #   key            = "dms-migration-project-bucket/terraform.tfstate"
+  #   region         = "us-east-1"
+  #   encrypt        = true
+  #   dynamodb_table = "dms-migration-terraform-state-lock"
+  # }
 }
 
 # Configure the AWS Provider

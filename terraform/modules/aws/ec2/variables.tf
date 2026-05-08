@@ -6,3 +6,7 @@ variable "key_name"{}
 variable "subnet_id"{}
 variable "security_groups"{}
 variable "user_data"{}
+variable "iam_instance_profile"{
+    type = string
+    default = ""
+}

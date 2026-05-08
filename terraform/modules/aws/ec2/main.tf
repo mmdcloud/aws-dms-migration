@@ -6,6 +6,7 @@ resource "aws_instance" "instance" {
   subnet_id       = var.subnet_id
   security_groups = var.security_groups
   user_data       = var.user_data
+  iam_instance_profile = var.iam_instance_profile
   tags = {
     Name = var.name
   }
