@@ -1,0 +1,11 @@
+source_location              = "your-source-location"
+destination_location         = "your-destination-location"
+source_db                    = "your-source-db"
+destination_db               = "your-destination-db"
+destination_public_subnets   = public-subnets
+destination_private_subnets  = private-subnets
+destination_database_subnets = database-subnets
+destination_azs              = azs
+notification_email           = "your-notification-email"
+dms_engine_version           = "your-dms-version"
+gcp_project                  = "your-project-id"
