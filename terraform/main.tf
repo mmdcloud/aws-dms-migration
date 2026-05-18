@@ -133,7 +133,7 @@ module "source_db" {
   ipv4_enabled                = false
   availability_type           = "REGIONAL"
   disk_size                   = 10
-  deletion_protection_enabled = false
+  deletion_protection_enabled = false # Make it true in production
   vpc_self_link               = module.source_vpc.self_link
   password                    = module.source_cloudsql_password_secret.secret_data
   backup_configuration = {
@@ -332,7 +332,7 @@ module "destination_db" {
   ]
   vpc_security_group_ids = [module.destination_rds_sg.id]
   publicly_accessible    = false
-  skip_final_snapshot    = true
+  skip_final_snapshot    = true # Make it false in production 
 }
 
 # ------------------------------------------------------------------------
@@ -636,6 +636,8 @@ resource "aws_route" "to_gcp_cloudsql_peered" {
     google_compute_vpn_tunnel.gcp_tunnel4
   ]
 }
+
+# Make sure awscli, boto3 and gcloud are installed on your local system 
 
 # Wait for VPN tunnels and BGP to establish (increased from 60s to 300s)
 # Wait for all 4 BGP sessions to reach ESTABLISHED before allowing DMS to proceed.
@@ -950,6 +952,24 @@ resource "aws_iam_role_policy_attachment" "dms_cloudwatch_logs_role_attachment" 
 }
 
 # ------------------------------------------------------------------------
+# DMS Certificate Configuration
+# ------------------------------------------------------------------------
+
+resource "aws_dms_certificate" "source_cloudsql_ca" {
+  certificate_id  = "cloudsql-source-ca"
+  certificate_pem = file("${path.module}/certs/cloudsql-server-ca.pem")
+
+  tags = local.common_tags
+}
+
+resource "aws_dms_certificate" "destination_rds_ca" {
+  certificate_id  = "rds-destination-ca"
+  certificate_pem = file("${path.module}/certs/rds-ca-bundle.pem")
+
+  tags = local.common_tags
+}
+
+# ------------------------------------------------------------------------
 # DMS Configuration
 # ------------------------------------------------------------------------
 module "dms_replication_instance" {
@@ -969,22 +989,25 @@ module "dms_replication_instance" {
     module.destination_vpc.private_subnets[2]
   ]
 
-  source_endpoint_id        = "cloudsql-source"
-  source_endpoint_type      = "source"
-  source_engine_name        = "mysql"
-  source_username           = tostring(data.vault_generic_secret.cloudsql.data["username"])
-  source_password           = tostring(data.vault_generic_secret.cloudsql.data["password"])
-  source_server_name        = module.source_db.private_ip_address
-  source_port               = 3306
-  source_ssl_mode           = "none"
-  destination_endpoint_id   = "rds"
-  destination_endpoint_type = "target"
-  destination_engine_name   = "mysql"
-  destination_username      = tostring(data.vault_generic_secret.rds.data["username"])
-  destination_password      = tostring(data.vault_generic_secret.rds.data["password"])
-  destination_server_name   = split(":", module.destination_db.endpoint)[0]
-  destination_port          = 3306
-  destination_ssl_mode      = "none"
+  source_endpoint_id     = "cloudsql-source"
+  source_endpoint_type   = "source"
+  source_engine_name     = "mysql"
+  source_username        = tostring(data.vault_generic_secret.cloudsql.data["username"])
+  source_password        = tostring(data.vault_generic_secret.cloudsql.data["password"])
+  source_server_name     = module.source_db.private_ip_address
+  source_port            = 3306
+  source_ssl_mode        = "verify-ca"
+  source_certificate_arn = aws_dms_certificate.source_cloudsql_ca.certificate_arn
+
+  destination_endpoint_id     = "rds"
+  destination_endpoint_type   = "target"
+  destination_engine_name     = "mysql"
+  destination_username        = tostring(data.vault_generic_secret.rds.data["username"])
+  destination_password        = tostring(data.vault_generic_secret.rds.data["password"])
+  destination_server_name     = split(":", module.destination_db.endpoint)[0]
+  destination_port            = 3306
+  destination_ssl_mode        = "verify-full"
+  destination_certificate_arn = aws_dms_certificate.destination_rds_ca.certificate_arn
 
   tasks = [
     {
@@ -1058,6 +1081,8 @@ module "dms_replication_instance" {
   depends_on = [
     aws_iam_role_policy_attachment.dms_vpc_role_attachment,
     aws_iam_role_policy_attachment.dms_cloudwatch_logs_role_attachment,
+    aws_dms_certificate.source_cloudsql_ca,
+    aws_dms_certificate.destination_rds_ca,
     module.source_db,
     module.destination_db,
     null_resource.wait_for_vpn_bgp
@@ -1181,24 +1206,6 @@ module "rds_free_storage" {
   statistic           = "Average"
   threshold           = "10737418240" # 10GB in bytes
   alarm_description   = "RDS free storage space is critically low"
-  ok_actions          = [module.dms_event_notification.topic_arn]
-  alarm_actions       = [module.dms_event_notification.topic_arn]
-  dimensions = {
-    DBInstanceIdentifier = module.destination_db.id
-  }
-}
-
-module "rds_replica_lag" {
-  source              = "./modules/aws/cloudwatch/cloudwatch-alarm"
-  alarm_name          = "rds-replica-lag"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "ReplicaLag"
-  namespace           = "AWS/RDS"
-  period              = "60"
-  statistic           = "Average"
-  threshold           = "30" # 30 seconds
-  alarm_description   = "RDS replica lag is high"
   ok_actions          = [module.dms_event_notification.topic_arn]
   alarm_actions       = [module.dms_event_notification.topic_arn]
   dimensions = {
@@ -1353,17 +1360,12 @@ data "aws_ami" "ubuntu" {
   owners = ["099720109477"]
 }
 
-data "aws_key_pair" "key_pair" {
-  key_name = "madmaxkeypair"
-}
-
 module "destination_test_instance" {
   source                      = "./modules/aws/ec2"
   name                        = "destination-test-instance"
   ami                         = data.aws_ami.ubuntu.id
   instance_type               = "t2.micro"
   associate_public_ip_address = true
-  key_name                    = data.aws_key_pair.key_pair.key_name
   subnet_id                   = module.destination_vpc.public_subnets[0]
   security_groups             = [module.destination_test_instance_sg.id]
   iam_instance_profile        = aws_iam_instance_profile.destination_test_iam_instance_profile.name

@@ -19,6 +19,7 @@ resource "aws_dms_endpoint" "source" {
   server_name   = var.source_server_name
   port          = var.source_port
   ssl_mode      = var.source_ssl_mode
+  certificate_arn = var.source_ssl_mode != "none" ? var.source_certificate_arn : null
 }
 
 resource "aws_dms_endpoint" "target" {
@@ -30,6 +31,7 @@ resource "aws_dms_endpoint" "target" {
   server_name   = var.destination_server_name
   port          = var.destination_port
   ssl_mode      = var.destination_ssl_mode
+  certificate_arn =  var.destination_ssl_mode != "none" ? var.destination_certificate_arn : null
 }
 
 resource "aws_dms_replication_subnet_group" "dms" {
