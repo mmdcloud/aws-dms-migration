@@ -80,7 +80,7 @@ module "source_vpc" {
   ]
 }
 
-# # ------------------------------------------------------------------------
+# ------------------------------------------------------------------------
 # GCP Secret Manager Configuration
 # ------------------------------------------------------------------------
 module "source_cloudsql_password_secret" {
@@ -954,7 +954,6 @@ resource "aws_iam_role_policy_attachment" "dms_cloudwatch_logs_role_attachment" 
 # ------------------------------------------------------------------------
 # DMS Certificate Configuration
 # ------------------------------------------------------------------------
-
 resource "aws_dms_certificate" "source_cloudsql_ca" {
   certificate_id  = "cloudsql-source-ca"
   certificate_pem = file("${path.module}/certs/cloudsql-server-ca.pem")
