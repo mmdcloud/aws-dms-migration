@@ -315,6 +315,7 @@ resource "null_resource" "wait_for_vpn_bgp" {
   }
 
   provisioner "local-exec" {
+    interpreter = ["/usr/bin/env", "bash"]
     command = <<-EOT
       #!/usr/bin/env bash
       set -euo pipefail
